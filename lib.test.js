@@ -52,7 +52,7 @@ test('server refuses unsafe runs and allows one at a time', async () => {
   });
   try {
     const html = await (await fetch(base)).text();
-    assert.ok(html.includes('<option>repo</option>') && html.includes('<option>plain</option>'));
+    assert.ok(html.includes('<option value="repo">repo</option>') && html.includes('<option value="plain">plain</option>'));
     assert.strictEqual((await post('repo', 'https://evil.com')).status, 403);
     assert.strictEqual((await post('plain')).status, 400);
     fs.writeFileSync(path.join(repo, 'dirty.txt'), 'x');
@@ -286,4 +286,56 @@ test('run filter parsing', () => {
   assert.deepStrictEqual(parse(''), { q: '', from: '', to: '', page: 1 });
   assert.deepStrictEqual(parse('q=%20a%20&page=2'), { q: 'a', from: '', to: '', page: 2 });
   assert.strictEqual(parse('from=2026-01-01'), null);
+});
+
+test('project settings are validated, grouped and escaped', () => {
+  const names = ['a', 'b', 'c'];
+  const { parseProjectSettings, projectView, projectOptions } = require('./lib');
+  const row = (over) => ({ name: 'a', alias: '', group: '', ...over });
+  assert.deepStrictEqual(parseProjectSettings([row({ alias: ' x ', group: '미분류' })], names), [{ name: 'a', alias: 'x', group: '' }]);
+  for (const bad of [null, {}, [null], [row({ name: '../a' })], [row({ alias: 1 })], [row({ group: 'x'.repeat(51) })]]) {
+    assert.strictEqual(parseProjectSettings(bad, names), null);
+  }
+  const view = projectView(names, [
+    { name: 'a', alias: '<A>', group_name: '팀' },
+    { name: 'gone', alias: 'x', group_name: '없는 그룹' },
+  ]);
+  assert.deepStrictEqual(view.groups, ['팀']);
+  const html = projectOptions(view);
+  assert.ok(html.includes('<optgroup label="팀"><option value="a">&#60;A&#62;</option></optgroup>'));
+  assert.ok(html.includes('<optgroup label="미분류"><option value="b">b</option><option value="c">c</option></optgroup>'));
+});
+
+test('project settings save, survive a restart and only change labels', async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runner-db-')), 'runner.db');
+  let db = openDb(file);
+  const runId = db.createRun({ project: 'repo', url: 'https://www.notion.so/a', branch: 'b' });
+  const app = createApp({ root: tmp, db });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const save = (body, origin = base) => fetch(`${base}/projects`, {
+    method: 'POST', headers: { Origin: origin }, body: JSON.stringify(body),
+  });
+  try {
+    assert.strictEqual((await save([], 'https://evil.com')).status, 403);
+    assert.strictEqual((await save([{ name: '../x', alias: 'a', group: '' }])).status, 400);
+    const saved = await save([{ name: 'repo', alias: '<저장소>', group: '팀' }]);
+    assert.strictEqual(saved.status, 200);
+    const { options, groups } = await saved.json();
+    assert.deepStrictEqual(groups, ['팀']);
+    assert.ok(options.includes('<option value="repo">&#60;저장소&#62;</option>'));
+    const home = await (await fetch(base)).text();
+    assert.ok(home.includes('value="&#60;저장소&#62;"') && !home.includes('<저장소>'));
+    const detail = await (await fetch(`${base}/runs/${runId}`)).text();
+    assert.ok(detail.includes('&#60;저장소&#62; (repo)'));
+  } finally {
+    app.closeAllConnections();
+    app.close();
+  }
+  db.close();
+  db = openDb(file);
+  assert.strictEqual(db.getProjectSettings('repo').group_name, '팀');
+  db.saveProjectSettings([{ name: 'repo', alias: '', group: '' }]);
+  assert.strictEqual(db.getProjectSettings('repo').alias, null);
+  db.close();
 });

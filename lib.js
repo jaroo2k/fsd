@@ -12,6 +12,45 @@ function isValidProject(name, root) {
 
 const escapeHtml = (text) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+const UNGROUPED = '미분류';
+const MAX_SETTING_LENGTH = 50;
+
+// Returns the cleaned settings, or null when any row is invalid so nothing gets saved.
+function parseProjectSettings(input, names) {
+  if (!Array.isArray(input)) return null;
+  const settings = [];
+  for (const row of input) {
+    if (!names.includes(row?.name) || typeof row.alias !== 'string' || typeof row.group !== 'string') return null;
+    const alias = row.alias.trim();
+    const group = row.group.trim();
+    if (alias.length > MAX_SETTING_LENGTH || group.length > MAX_SETTING_LENGTH) return null;
+    settings.push({ name: row.name, alias, group: group === UNGROUPED ? '' : group });
+  }
+  return settings;
+}
+
+// Folders are the source of truth: settings of a removed folder are simply not shown.
+function projectView(names, settings) {
+  const byName = new Map(settings.map((s) => [s.name, s]));
+  const rows = names.map((name) => ({
+    name,
+    alias: byName.get(name)?.alias || '',
+    group: byName.get(name)?.group_name || '',
+  }));
+  const groups = [...new Set(rows.map((r) => r.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return { rows, groups };
+}
+
+function projectOptions({ rows, groups }) {
+  const options = (group) => rows.filter((r) => r.group === group)
+    .map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.alias || r.name)}</option>`).join('');
+  const optgroup = (label, group) => {
+    const inner = options(group);
+    return inner && `<optgroup label="${escapeHtml(label)}">${inner}</optgroup>`;
+  };
+  return `<option value="">선택하세요</option>${groups.map((g) => optgroup(g, g)).join('')}${optgroup(UNGROUPED, '')}`;
+}
+
 function parseNotionUrl(value) {
   let url;
   try { url = new URL(value); } catch { return null; }
@@ -70,5 +109,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
+  listProjects, parseProjectSettings, projectView, projectOptions, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
 };

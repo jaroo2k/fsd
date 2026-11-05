@@ -23,6 +23,11 @@ function openDb(file) {
       text TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS run_logs_run_id ON run_logs(run_id);
+    CREATE TABLE IF NOT EXISTS projects (
+      name TEXT PRIMARY KEY,
+      alias TEXT,
+      group_name TEXT
+    );
   `);
   // Databases created before summaries existed keep their rows; those fall back to the default title.
   if (!db.prepare('PRAGMA table_info(runs)').all().some((column) => column.name === 'summary')) {
@@ -43,6 +48,10 @@ function openDb(file) {
   const selectRuns = db.prepare(`SELECT *, ${TITLE} AS title FROM runs ${FILTER} ORDER BY id DESC LIMIT :limit OFFSET :offset`);
   const selectRun = db.prepare(`SELECT *, ${TITLE} AS title FROM runs WHERE id = ?`);
   const selectLogs = db.prepare('SELECT text FROM run_logs WHERE run_id = ? ORDER BY id');
+  const upsertProject = db.prepare(`INSERT INTO projects (name, alias, group_name) VALUES (?, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET alias = excluded.alias, group_name = excluded.group_name`);
+  const selectProjects = db.prepare('SELECT * FROM projects');
+  const selectProject = db.prepare('SELECT * FROM projects WHERE name = ?');
 
   return {
     createRun: ({ project, url, branch }) => Number(insertRun.run(project, url, branch, now()).lastInsertRowid),
@@ -60,6 +69,19 @@ function openDb(file) {
     },
     getRun: (runId) => selectRun.get(runId),
     getLogs: (runId) => selectLogs.all(runId).map((row) => row.text),
+    listProjectSettings: () => selectProjects.all(),
+    getProjectSettings: (name) => selectProject.get(name),
+    // All or nothing, so a failed save never leaves the form half applied.
+    saveProjectSettings: (settings) => {
+      db.exec('BEGIN');
+      try {
+        for (const { name, alias, group } of settings) upsertProject.run(name, alias || null, group || null);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
     close: () => db.close(),
   };
 }

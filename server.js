@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const {
-  listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
+  listProjects, parseProjectSettings, projectView, projectOptions, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
 } = require('./lib');
 const { openDb } = require('./db');
 
@@ -35,7 +35,9 @@ input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,su
 button{height:2.75rem;padding:0 1.5rem;font:inherit;font-weight:600;color:var(--on-accent);background:var(--accent);border:0;border-radius:.6rem;cursor:pointer;transition:background .15s}
 button:hover{background:var(--accent-hover)}
 #status{margin:.9rem 0 0;font-size:.925rem;font-weight:600}#status:empty{display:none}
-#status.ok{color:var(--ok)}#status.err{color:var(--err)}
+#status.ok,#projects-note.ok{color:var(--ok)}#status.err,#projects-note.err{color:var(--err)}
+.projects input{margin-top:0}.project-actions{display:flex;align-items:center;gap:.9rem;margin-top:.75rem}
+#projects-note{margin:0;font-size:.925rem;font-weight:600}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:.7rem .5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
 tr:last-child>td,tr:last-child>th{border-bottom:0}
@@ -74,11 +76,19 @@ ${style}
 <main>
 <header class="brand"><span class="mark" aria-hidden="true">N</span><div><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></div></header>
 <section class="card">
-<form id="f"><label>프로젝트<select name="project" required><option value="">선택하세요</option>${projects.map((p) => `<option>${escapeHtml(p)}</option>`).join('')}</select></label>
+<form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
 <label>노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..." required></label><button>시작</button></form>
 <p id="status" role="status"></p>
 </section>
 <details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
+<details class="card"><summary><h2>프로젝트 관리</h2></summary>
+<form id="projects"><table class="projects"><thead><tr><th>폴더</th><th>별칭</th><th>그룹</th></tr></thead><tbody>
+${projects.rows.map((r) => `<tr data-name="${escapeHtml(r.name)}"><td>${escapeHtml(r.name)}</td>
+<td><input name="alias" maxlength="50" aria-label="${escapeHtml(r.name)} 별칭" value="${escapeHtml(r.alias)}"></td>
+<td><input name="group" maxlength="50" list="group-names" aria-label="${escapeHtml(r.name)} 그룹" value="${escapeHtml(r.group)}"></td></tr>`).join('')}
+</tbody></table>
+<datalist id="group-names">${projects.groups.map((g) => `<option value="${escapeHtml(g)}"></option>`).join('')}</datalist>
+<div class="project-actions"><button>저장</button><p id="projects-note" role="status"></p></div></form></details>
 <section class="card"><h2>작업 기록</h2>
 <form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
 <label>날짜<input name="date" type="date"></label>
@@ -167,6 +177,33 @@ const es = new EventSource('/events');
 es.onopen = () => { log.textContent = ''; loadRuns(); };
 es.addEventListener('runs', loadRuns);
 const status = document.getElementById('status');
+const projectForm = document.getElementById('projects');
+const projectNote = document.getElementById('projects-note');
+projectForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const body = JSON.stringify([...projectForm.querySelectorAll('tr[data-name]')].map((row) => ({
+    name: row.dataset.name,
+    alias: row.querySelector('[name=alias]').value,
+    group: row.querySelector('[name=group]').value,
+  })));
+  projectNote.className = '';
+  projectNote.textContent = '저장 중...';
+  try {
+    const res = await fetch('/projects', { method: 'POST', body });
+    if (!res.ok) throw new Error(await res.text());
+    const { options, groups } = await res.json();
+    const select = document.querySelector('select[name=project]');
+    const selected = select.value;
+    select.innerHTML = options;
+    select.value = selected;
+    document.getElementById('group-names').replaceChildren(...groups.map((g) => new Option(g)));
+    projectNote.className = 'ok';
+    projectNote.textContent = '저장했습니다.';
+  } catch (err) {
+    projectNote.className = 'err';
+    projectNote.textContent = '저장하지 못했습니다. ' + err.message;
+  }
+};
 es.onmessage = (e) => {
   const text = JSON.parse(e.data);
   if (text.startsWith('시작: ')) log.textContent = '';
@@ -189,7 +226,7 @@ document.getElementById('f').onsubmit = async (e) => {
 };
 </script></html>`;
 
-const detailPage = (run, logs) => `<!doctype html><html lang="ko"><meta charset="utf-8">
+const detailPage = (run, logs, alias) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(run.title)}</title>
 ${run.status === 'running' ? '<meta http-equiv="refresh" content="3">' : ''}
 ${style}
@@ -197,7 +234,7 @@ ${style}
 <a class="back" href="/">← 목록</a>
 <header class="title"><h1>${escapeHtml(run.title)}</h1><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></header>
 <section class="card"><table class="meta">
-<tr><th>프로젝트</th><td>${escapeHtml(run.project)}</td></tr>
+<tr><th>프로젝트</th><td>${escapeHtml(alias ? `${alias} (${run.project})` : run.project)}</td></tr>
 <tr><th>브랜치</th><td>${escapeHtml(run.branch)}</td></tr>
 <tr><th>노션 문서</th><td><a href="${escapeHtml(run.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.url)}</a></td></tr>
 <tr><th>시작</th><td><time datetime="${escapeHtml(run.started_at)}">${escapeHtml(run.started_at)}</time></td></tr>
@@ -297,6 +334,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
 
   return http.createServer((req, res) => {
     const port = req.socket.localPort;
+    const projects = () => projectView(listProjects(root), db.listProjectSettings());
     const send = (status, text) => {
       res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' }).end(text);
     };
@@ -304,7 +342,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     if (!isLocalRequest(req.headers, port, isPost)) return send(403, '로컬 요청만 허용합니다.');
 
     if (req.method === 'GET' && req.url === '/') {
-      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page(listProjects(root)));
+      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page(projects()));
     }
     if (req.method === 'GET' && req.url === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
@@ -328,20 +366,32 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       const run = db.getRun(Number(detail[1]));
       if (!run) return send(404, '없는 작업입니다.');
       return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-        .end(detailPage(runView(run), db.getLogs(run.id)));
+        .end(detailPage(runView(run), db.getLogs(run.id), db.getProjectSettings(run.project)?.alias));
     }
-    if (!isPost || req.url !== '/run') return send(404, '없는 경로입니다.');
+    if (!isPost || !['/run', '/projects'].includes(req.url)) return send(404, '없는 경로입니다.');
 
     let body = '';
     let tooLarge = false;
     req.setEncoding('utf8').on('data', (chunk) => {
       body += chunk;
-      if (body.length > 10000) { tooLarge = true; body = ''; }
+      if (body.length > 100000) { tooLarge = true; body = ''; }
     });
     req.on('end', () => {
       if (tooLarge) return send(413, '요청이 너무 큽니다.');
       let input;
       try { input = JSON.parse(body); } catch { return send(400, '잘못된 요청입니다.'); }
+      if (req.url === '/projects') {
+        const settings = parseProjectSettings(input, listProjects(root));
+        if (!settings) return send(400, '별칭과 그룹을 확인해 주세요.');
+        try {
+          db.saveProjectSettings(settings);
+        } catch (err) {
+          return send(500, err.message);
+        }
+        const view = projects();
+        return res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+          .end(JSON.stringify({ options: projectOptions(view), groups: view.groups }));
+      }
       if (!isValidProject(input?.project, root)) return send(400, '없는 프로젝트입니다.');
       const url = parseNotionUrl(input.url);
       if (!url) return send(400, '노션 링크가 아닙니다.');

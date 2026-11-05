@@ -23,6 +23,10 @@ docker compose up -d --build
 
 DB 위치는 `RUNNER_DB` 환경 변수로 정하며, 기본값은 이 폴더의 `runner.db`입니다. Docker에서는 `runner-data` 볼륨의 `/data/runner.db`에 저장되어 컨테이너를 다시 만들어도 유지됩니다. 기록을 지우려면 `docker compose down -v`로 볼륨을 삭제합니다.
 
+## 프로젝트 관리
+
+첫 화면의 `프로젝트 관리`에서 폴더마다 별칭과 그룹을 정합니다(각각 50자 이내). 프로젝트 선택 목록은 그룹별로 묶여 별칭으로 표시되고, 그룹이 없으면 `미분류`에 들어갑니다. 어떤 프로젝트도 쓰지 않는 그룹은 자동으로 사라집니다. 실행에는 계속 실제 폴더명을 씁니다.
+
 ## 테스트 환경
 
 러너 이미지에는 Python, pytest, Docker CLI와 Compose, Playwright와 Chromium이 들어 있습니다. Docker 명령은 호스트가 아니라 별도의 `docker` 서비스에서 실행되므로 호스트의 컨테이너에는 접근하지 않습니다. 프로젝트에서 공개한 포트는 `docker` 호스트로 접속합니다. 받은 이미지는 `docker-data` 볼륨에 쌓이며, 이 볼륨도 `docker compose down -v`로 지워집니다.
