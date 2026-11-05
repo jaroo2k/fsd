@@ -49,14 +49,14 @@ function projectView(names, settings, groups) {
   return { rows, groups: [...groups].sort((a, b) => a.localeCompare(b)) };
 }
 
-function projectOptions({ rows, groups }) {
+function projectOptions({ rows, groups }, emptyLabel = '선택하세요') {
   const options = (group) => rows.filter((r) => r.group === group)
     .map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.alias || r.name)}</option>`).join('');
   const optgroup = (label, group) => {
     const inner = options(group);
     return inner && `<optgroup label="${escapeHtml(label)}">${inner}</optgroup>`;
   };
-  return `<option value="">선택하세요</option>${groups.map((g) => optgroup(g, g)).join('')}${optgroup(UNGROUPED, '')}`;
+  return `<option value="">${escapeHtml(emptyLabel)}</option>${groups.map((g) => optgroup(g, g)).join('')}${optgroup(UNGROUPED, '')}`;
 }
 
 function groupOptions(groups, selected = '') {
@@ -95,7 +95,7 @@ function formatEvent(line) {
   return null;
 }
 
-const STATUS_LABELS = { running: '실행 중', success: '완료', failed: '실패', interrupted: '중단됨' };
+const STATUS_LABELS = { queued: '대기 중', running: '실행 중', success: '완료', failed: '실패', interrupted: '중단됨' };
 
 const runView = (run) => ({
   ...run,
@@ -120,7 +120,7 @@ function parseRunFilter(params) {
   const to = params.get('to') || '';
   if ((from && !ISO_TIME.test(from)) || (to && !ISO_TIME.test(to))) return null;
   const page = Number.parseInt(params.get('page'), 10);
-  return { q: (params.get('q') || '').trim(), from, to, page: page > 0 ? page : 1 };
+  return { q: (params.get('q') || '').trim(), project: params.get('project') || '', from, to, page: page > 0 ? page : 1 };
 }
 
 module.exports = {

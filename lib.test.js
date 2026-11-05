@@ -283,8 +283,8 @@ test('run list pages by 20 and filters by title and time', async () => {
 
 test('run filter parsing', () => {
   const parse = (query) => parseRunFilter(new URLSearchParams(query));
-  assert.deepStrictEqual(parse(''), { q: '', from: '', to: '', page: 1 });
-  assert.deepStrictEqual(parse('q=%20a%20&page=2'), { q: 'a', from: '', to: '', page: 2 });
+  assert.deepStrictEqual(parse(''), { q: '', project: '', from: '', to: '', page: 1 });
+  assert.deepStrictEqual(parse('q=%20a%20&page=2'), { q: 'a', project: '', from: '', to: '', page: 2 });
   assert.strictEqual(parse('from=2026-01-01'), null);
 });
 
@@ -424,4 +424,188 @@ test('groups already on projects carry over, and a deleted one stays deleted aft
   assert.deepStrictEqual(db.listGroups(), []);
   assert.strictEqual(db.getProjectSettings('a').group_name, null);
   db.close();
+});
+
+// Fake runs that wait until told to end, so a test can decide when each one finishes.
+async function queueApp(db = openDb(':memory:')) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-'));
+  for (const name of ['a', 'b', 'plain']) fs.mkdirSync(path.join(root, name));
+  for (const name of ['a', 'b']) {
+    const g = (...args) => execFileSync('git', args, { cwd: path.join(root, name), stdio: 'pipe' });
+    g('init');
+    g('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-m', 'init');
+  }
+  const started = [];
+  const start = (prompt, cwd) => {
+    const child = spawn(process.execPath, ['-e', `
+      console.log(JSON.stringify({type:'result',is_error:false}));
+      process.stdin.on('data', () => process.exit(0));`], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    started.push({ prompt, project: path.basename(cwd), end: () => child.stdin.write('x') });
+    return child;
+  };
+  const app = createApp({ root, db, start });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const post = (project, page) => fetch(`${base}/run`, {
+    method: 'POST', headers: { Origin: base },
+    body: JSON.stringify({ project, url: `https://www.notion.so/${page}` }),
+  });
+  const list = async (query = '') => (await (await fetch(`${base}/runs${query}`)).json()).runs;
+  const statuses = async () => (await list()).reverse().map((r) => r.status);
+  const until = async (check) => {
+    for (let i = 0; i < 200; i += 1) {
+      if (await check()) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    assert.fail('timed out');
+  };
+  const close = () => { app.closeAllConnections(); app.close(); };
+  return { root, base, post, list, statuses, started, until, close };
+}
+
+test('requests during a run wait and then run one at a time, in order', async () => {
+  const t = await queueApp();
+  try {
+    assert.strictEqual((await t.post('a', 'one')).status, 202);
+    const waiting = await t.post('b', 'two');
+    assert.strictEqual(waiting.status, 202);
+    assert.match(await waiting.text(), /대기 1번째/);
+    assert.strictEqual((await t.post('a', 'three')).status, 202);
+    assert.deepStrictEqual(await t.statuses(), ['running', 'queued', 'queued']);
+    assert.strictEqual(t.started.length, 1, 'nothing else starts while the first runs');
+
+    const queued = (await t.list())[1];
+    assert.strictEqual(queued.statusLabel, '대기 중');
+    assert.strictEqual(queued.title, 'b', 'a queued run has no branch to show yet');
+    assert.strictEqual(queued.branch, '');
+    const detail = await (await fetch(`${t.base}/runs/${queued.id}`)).text();
+    assert.ok(detail.includes('http-equiv="refresh"'), 'a waiting page keeps refreshing');
+
+    t.started[0].end();
+    await t.until(async () => (await t.statuses()).join() === 'success,running,queued');
+    assert.strictEqual(t.started.length, 2);
+    assert.strictEqual(t.started[1].project, 'b');
+    const second = (await t.list())[1];
+    assert.ok(second.prompt === undefined && second.branch.startsWith('notion/'));
+    assert.ok(t.started[1].prompt.includes('https://www.notion.so/two') && t.started[1].prompt.includes(second.branch));
+    assert.ok(second.started_at >= (await t.list())[2].started_at, 'start time becomes the real start');
+
+    t.started[1].end();
+    await t.until(async () => (await t.statuses()).join() === 'success,success,running');
+    t.started[2].end();
+    await t.until(async () => (await t.statuses()).join() === 'success,success,success');
+    assert.deepStrictEqual(t.started.map((s) => s.project), ['a', 'b', 'a']);
+    assert.strictEqual((await t.post('a', 'four')).status, 202, 'an idle server starts right away');
+    assert.strictEqual((await t.statuses()).at(-1), 'running');
+    t.started[3].end();
+    await t.until(async () => (await t.statuses()).at(-1) === 'success');
+  } finally {
+    t.close();
+  }
+});
+
+test('a duplicate or non-repository request is not queued', async () => {
+  const t = await queueApp();
+  try {
+    assert.strictEqual((await t.post('a', 'one')).status, 202);
+    assert.strictEqual((await t.post('a', 'one')).status, 409, 'same as the running one');
+    assert.strictEqual((await t.post('plain', 'two')).status, 400);
+    assert.strictEqual((await t.post('b', 'two')).status, 202);
+    assert.strictEqual((await t.post('b', 'two')).status, 409, 'same as a waiting one');
+    assert.strictEqual((await t.post('b', 'one')).status, 202, 'same page in another project is different work');
+    assert.strictEqual((await t.list()).length, 3);
+    for (const name of ['b', 'b']) {
+      t.started.at(-1).end();
+      const count = t.started.length;
+      await t.until(() => t.started.length > count);
+      assert.strictEqual(t.started.at(-1).project, name);
+    }
+    t.started.at(-1).end();
+    await t.until(async () => (await t.statuses()).every((s) => s === 'success'));
+  } finally {
+    t.close();
+  }
+});
+
+test('a queued run that cannot start fails and the next one still runs', async () => {
+  const t = await queueApp();
+  try {
+    await t.post('a', 'one');
+    await t.post('a', 'two');
+    await t.post('b', 'three');
+    fs.writeFileSync(path.join(t.root, 'a', 'left-behind.txt'), 'x');
+    t.started[0].end();
+    await t.until(async () => (await t.statuses()).join() === 'success,failed,running');
+    assert.strictEqual(t.started.length, 2);
+    assert.strictEqual(t.started[1].project, 'b');
+    const failed = (await t.list())[1];
+    const detail = await (await fetch(`${t.base}/runs/${failed.id}`)).text();
+    assert.ok(detail.includes('커밋하지 않은 변경이 있습니다.'));
+    assert.ok(failed.finished_at);
+    t.started[1].end();
+    await t.until(async () => (await t.statuses()).at(-1) === 'success');
+  } finally {
+    t.close();
+  }
+});
+
+test('queued runs that start within one second get different branches', async () => {
+  const db = openDb(':memory:');
+  const t = await queueApp(db);
+  try {
+    await t.post('a', 'one');
+    await t.post('a', 'two');
+    await t.post('a', 'three');
+    for (const i of [0, 1, 2]) {
+      await t.until(() => t.started.length > i);
+      t.started[i].end();
+    }
+    await t.until(async () => (await t.statuses()).every((s) => s === 'success'));
+    const branches = (await t.list()).map((r) => r.branch);
+    assert.strictEqual(new Set(branches).size, 3, branches.join());
+  } finally {
+    t.close();
+  }
+});
+
+test('waiting runs become interrupted after a restart and do not start by themselves', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runner-')), 'runner.db');
+  const first = openDb(file);
+  const id = first.enqueueRun({ project: 'repo', url: 'https://www.notion.so/a' });
+  first.close();
+  const second = openDb(file);
+  const run = second.getRun(id);
+  assert.strictEqual(run.status, 'interrupted');
+  assert.ok(run.finished_at);
+  second.close();
+});
+
+test('run list shows the project alias and filters by project', async () => {
+  const db = openDb(':memory:');
+  db.saveProjectSettings([{ name: 'a', alias: '별칭 A', group: '' }]);
+  const url = 'https://www.notion.so/x';
+  db.createRun({ project: 'a', url, branch: 'notion/1' });
+  db.createRun({ project: 'b', url, branch: 'notion/2' });
+  // Exact match: "a" must not also find a project whose name only contains it.
+  db.createRun({ project: 'aa', url, branch: 'notion/3' });
+  const t = await queueApp(db);
+  try {
+    const projectsOf = (runs) => runs.map((r) => r.project);
+    assert.deepStrictEqual(projectsOf(await t.list()), ['aa', 'b', 'a']);
+    const [only] = await t.list('?project=a');
+    assert.strictEqual(only.project, 'a');
+    assert.strictEqual(only.alias, '별칭 A');
+    assert.deepStrictEqual(projectsOf(await t.list('?project=a')), ['a']);
+    assert.strictEqual((await t.list('?project=b'))[0].alias, null);
+    assert.deepStrictEqual(await t.list('?project=none'), []);
+    assert.deepStrictEqual(projectsOf(await t.list('?project=a&q=notion/2')), []);
+    const { total } = await (await fetch(`${t.base}/runs?project=b`)).json();
+    assert.strictEqual(total, 1, 'the page count follows the filter');
+    const html = await (await fetch(t.base)).text();
+    assert.ok(html.includes('<th>프로젝트</th>'));
+    assert.ok(html.includes('<select name="project"><option value="">전체</option>'));
+    assert.ok(html.includes('<select name="project" required><option value="">선택하세요</option>'));
+  } finally {
+    t.close();
+  }
 });

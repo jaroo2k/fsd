@@ -50,11 +50,11 @@ table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:.7rem .5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
 tr:last-child>td,tr:last-child>th{border-bottom:0}
 th{color:var(--muted);font-size:.8rem;font-weight:600}
-.runs td:nth-child(n+2){white-space:nowrap}.runs td:last-child{color:var(--muted);font-size:.9rem}
+.runs td:nth-child(n+3){white-space:nowrap}.runs td:last-child{color:var(--muted);font-size:.9rem}
 .runs tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .meta th{width:6.5rem;vertical-align:top;padding-top:.85rem}
 #runs-note{margin:.75rem .5rem 0;color:var(--muted);font-size:.925rem}#runs-note:empty{display:none}
-#search{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto auto;gap:.75rem;align-items:end;margin-bottom:.75rem}
+#search{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.5fr) minmax(0,1fr) auto auto;gap:.75rem;align-items:end;margin-bottom:.75rem}
 button.secondary{color:var(--text);background:transparent;border:1px solid var(--border)}
 button.secondary:hover:not(:disabled){background:var(--border)}
 button:disabled{opacity:.45;cursor:default}
@@ -75,7 +75,7 @@ font:.85rem/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,"Noto Sans Mono CJK K
 pre:empty::before{content:"표시할 로그가 없습니다.";color:#8a93a3}
 @media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f,#search,#group-form{grid-template-columns:minmax(0,1fr)}button{width:100%}
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
-.runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child{grid-column:1/-1}
+.runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child,.runs td:nth-child(2){grid-column:1/-1}.runs td:nth-child(2){color:var(--muted);font-size:.9rem}
 .brand{flex-wrap:wrap}.brand>div{flex:1 1 calc(100% - 3.65rem)}.brand .nav{margin-left:3.65rem}
 .projects thead{display:none}.projects tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .projects tr:last-child{border-bottom:0}.projects td{padding:0;border:0}.projects td:first-child{grid-column:1/-1;font-weight:600}}
@@ -94,9 +94,10 @@ ${style}
 <details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
 <section class="card"><h2>작업 기록</h2>
 <form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
+<label>프로젝트<select name="project">${projectOptions(projects, '전체')}</select></label>
 <label>날짜<input name="date" type="date"></label>
 <button>검색</button><button type="reset" class="secondary">초기화</button></form>
-<table class="runs"><thead><tr><th>제목</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
+<table class="runs"><thead><tr><th>제목</th><th>프로젝트</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
 <p id="runs-note" role="status"></p>
 <nav id="pager" aria-label="작업 기록 페이지" hidden><button id="prev" type="button" class="secondary">이전</button><span id="page-info"></span><button id="next" type="button" class="secondary">다음</button></nav></section>
 </main>
@@ -120,6 +121,7 @@ function readFilter() {
   const params = new URLSearchParams();
   const q = data.get('q').trim();
   if (q) params.set('q', q);
+  if (data.get('project')) params.set('project', data.get('project'));
   if (data.get('date')) {
     const day = new Date(data.get('date') + 'T00:00:00');
     params.set('from', day.toISOString());
@@ -153,7 +155,7 @@ async function loadRuns() {
       badge.className = 'badge ' + r.status;
       badge.textContent = r.statusLabel;
       const row = document.createElement('tr');
-      for (const content of [link, badge, new Date(r.started_at).toLocaleString()]) {
+      for (const content of [link, r.alias || r.project, badge, new Date(r.started_at).toLocaleString()]) {
         row.insertCell().append(content);
       }
       return row;
@@ -286,14 +288,14 @@ projectForm.onsubmit = async (e) => {
 
 const detailPage = (run, logs, alias) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(run.title)}</title>
-${run.status === 'running' ? '<meta http-equiv="refresh" content="3">' : ''}
+${['queued', 'running'].includes(run.status) ? '<meta http-equiv="refresh" content="3">' : ''}
 ${style}
 <main>
 <a class="back" href="/">← 목록</a>
 <header class="title"><h1>${escapeHtml(run.title)}</h1><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></header>
 <section class="card"><table class="meta">
 <tr><th>프로젝트</th><td>${escapeHtml(alias ? `${alias} (${run.project})` : run.project)}</td></tr>
-<tr><th>브랜치</th><td>${escapeHtml(run.branch)}</td></tr>
+<tr><th>브랜치</th><td>${escapeHtml(run.branch || '-')}</td></tr>
 <tr><th>노션 문서</th><td><a href="${escapeHtml(run.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.url)}</a></td></tr>
 <tr><th>시작</th><td><time datetime="${escapeHtml(run.started_at)}">${escapeHtml(run.started_at)}</time></td></tr>
 <tr><th>종료</th><td>${run.finished_at ? `<time datetime="${escapeHtml(run.finished_at)}">${escapeHtml(run.finished_at)}</time>` : '-'}</td></tr>
@@ -312,7 +314,8 @@ function runClaude(prompt, cwd) {
 }
 
 function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
-  let running = false;
+  let current = null;
+  const queue = [];
   let log = [];
   const clients = new Set();
   const emit = (text) => {
@@ -327,23 +330,52 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     try { write(); } catch (err) { console.error(`작업 기록 저장 실패: ${err.message}`); }
   };
 
-  function run(project, url) {
+  const isRepo = (project) => fs.existsSync(path.join(root, project, '.git'));
+
+  // Done when a run starts, not when it is queued: an earlier run may still be changing the same tree.
+  function createBranch(project) {
     const cwd = path.join(root, project);
-    if (!fs.existsSync(path.join(cwd, '.git'))) throw new Error('git 저장소가 아닙니다.');
+    if (!isRepo(project)) throw new Error('git 저장소가 아닙니다.');
     const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
     if (git('status', '--porcelain').trim()) throw new Error('커밋하지 않은 변경이 있습니다.');
     const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
-    const branch = `notion/${stamp}`;
+    const base = `notion/${stamp}`;
+    // A queued run can start within the same second when the one before it fails fast.
+    let branch = base;
+    for (let n = 2; git('branch', '--list', branch).trim(); n += 1) branch = `${base}-${n}`;
     git('switch', '-c', branch);
+    return branch;
+  }
 
-    const prompt = fs.readFileSync(path.join(__dirname, 'prompt.md'), 'utf8')
-      .replaceAll('{{URL}}', () => url).replaceAll('{{BRANCH}}', () => branch);
-    const runId = db.createRun({ project, url, branch });
+  // A run that can't start is recorded as failed and the queue moves on, so one bad job doesn't block the rest.
+  function startNext() {
+    const job = queue.shift();
+    if (!job) return;
+    let branch;
+    try {
+      branch = createBranch(job.project);
+      db.startRun(job.runId, branch);
+    } catch (err) {
+      const message = `실패: ${err.message}`;
+      emit(`${job.project} ${message}`);
+      record(() => db.appendLog(job.runId, message));
+      record(() => db.finishRun(job.runId, 'failed'));
+      notifyRuns();
+      startNext();
+      return;
+    }
+    try {
+      launch(job.runId, job.project, job.url, branch);
+    } catch { /* launch already recorded the failure and moved on */ }
+  }
+
+  function launch(runId, project, url, branch) {
+    const cwd = path.join(root, project);
     const say = (text) => {
       record(() => db.appendLog(runId, text));
       emit(text);
     };
-    running = true;
+    current = { project, url };
     log = [];
     say(`시작: ${project} (${branch})`);
     notifyRuns();
@@ -353,13 +385,16 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     const finish = (status, message) => {
       if (finished) return;
       finished = true;
-      running = false;
+      current = null;
       say(message);
       record(() => db.finishRun(runId, status));
       notifyRuns();
+      startNext();
     };
     let child;
     try {
+      const prompt = fs.readFileSync(path.join(__dirname, 'prompt.md'), 'utf8')
+        .replaceAll('{{URL}}', () => url).replaceAll('{{BRANCH}}', () => branch);
       child = start(prompt, cwd);
     } catch (err) {
       finish('failed', `실패: ${err.message}`);
@@ -471,9 +506,19 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       const url = parseNotionUrl(input.url);
       if (!url) return send(400, '노션 링크가 아닙니다.');
       if (start === runClaude && !process.env.NOTION_TOKEN) return send(400, 'NOTION_TOKEN이 설정되지 않았습니다.');
-      if (running) return send(409, '이미 실행 중입니다.');
+      // Also what stops a double click from running the same document twice.
+      const same = (job) => job.project === input.project && job.url === url;
+      if ((current && same(current)) || queue.some(same)) return send(409, '같은 문서의 작업이 이미 실행 중이거나 대기 중입니다.');
       try {
-        run(input.project, url);
+        if (current) {
+          if (!isRepo(input.project)) return send(400, 'git 저장소가 아닙니다.');
+          const runId = db.enqueueRun({ project: input.project, url });
+          queue.push({ runId, project: input.project, url });
+          notifyRuns();
+          return send(202, `대기 중입니다. 앞선 작업이 끝나면 순서대로 시작합니다. (대기 ${queue.length}번째)`);
+        }
+        const branch = createBranch(input.project);
+        launch(db.createRun({ project: input.project, url, branch }), input.project, url, branch);
         return send(202, '시작했습니다.');
       } catch (err) {
         return send(400, err.message);
