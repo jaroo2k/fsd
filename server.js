@@ -30,7 +30,8 @@ h2{margin:0 0 .85rem;font-size:1.05rem}
 #f{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:1rem;align-items:end}
 label{display:block;font-size:.875rem;font-weight:600}
 input,select{display:block;width:100%;height:2.75rem;margin-top:.4rem;padding:0 .8rem;font:inherit;font-weight:400;color:inherit;background:var(--field);border:1px solid var(--border);border-radius:.6rem}
-input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+summary{cursor:pointer;border-radius:.3rem}summary h2{display:inline;margin:0}details[open]>summary{margin-bottom:.85rem}
+input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button{height:2.75rem;padding:0 1.5rem;font:inherit;font-weight:600;color:var(--on-accent);background:var(--accent);border:0;border-radius:.6rem;cursor:pointer;transition:background .15s}
 button:hover{background:var(--accent-hover)}
 #status{margin:.9rem 0 0;font-size:.925rem;font-weight:600}#status:empty{display:none}
@@ -77,7 +78,7 @@ ${style}
 <label>노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..." required></label><button>시작</button></form>
 <p id="status" role="status"></p>
 </section>
-<section class="card"><h2>실시간 로그</h2><pre id="log" aria-live="polite"></pre></section>
+<details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
 <section class="card"><h2>작업 기록</h2>
 <form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
 <label>날짜<input name="date" type="date"></label>
@@ -88,6 +89,8 @@ ${style}
 </main>
 <script>
 const log = document.getElementById('log');
+// A collapsed log cannot scroll, so catch up on the lines that arrived meanwhile.
+document.getElementById('log-card').addEventListener('toggle', (e) => { if (e.target.open) log.scrollTop = log.scrollHeight; });
 const runsEl = document.getElementById('runs');
 const runsNote = document.getElementById('runs-note');
 const searchForm = document.getElementById('search');
