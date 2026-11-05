@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "notion": {
+      "command": "notion-mcp-server",
+      "env": { "NOTION_TOKEN": "${NOTION_TOKEN}" }
+    }
+  }
+}
