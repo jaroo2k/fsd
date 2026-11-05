@@ -45,8 +45,30 @@ const STATUS_LABELS = { running: '실행 중', success: '완료', failed: '실�
 
 const runView = (run) => ({
   ...run,
-  title: `${run.project} · ${run.branch}`,
   statusLabel: STATUS_LABELS[run.status] || run.status,
 });
 
-module.exports = { listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView };
+const SUMMARY_MAX = 100;
+
+// prompt.md asks for a "작업 요약: ..." line. The last one wins, since earlier text may quote the format.
+function extractSummary(text) {
+  if (typeof text !== 'string') return null;
+  const matches = [...text.matchAll(/^[ \t*_#>-]*작업 요약[ \t]*[:：][ \t*_`]*(.*?)[ \t*_`]*$/gm)];
+  const summary = matches.at(-1)?.[1];
+  return summary ? summary.slice(0, SUMMARY_MAX) : null;
+}
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+// Returns null for a bad time bound. started_at is compared as text, so only its exact format may pass.
+function parseRunFilter(params) {
+  const from = params.get('from') || '';
+  const to = params.get('to') || '';
+  if ((from && !ISO_TIME.test(from)) || (to && !ISO_TIME.test(to))) return null;
+  const page = Number.parseInt(params.get('page'), 10);
+  return { q: (params.get('q') || '').trim(), from, to, page: page > 0 ? page : 1 };
+}
+
+module.exports = {
+  listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
+};

@@ -2,7 +2,9 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
-const { listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView } = require('./lib');
+const {
+  listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
+} = require('./lib');
 const { openDb } = require('./db');
 
 const style = `<style>
@@ -41,6 +43,12 @@ th{color:var(--muted);font-size:.8rem;font-weight:600}
 .runs tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .meta th{width:6.5rem;vertical-align:top;padding-top:.85rem}
 #runs-note{margin:.75rem .5rem 0;color:var(--muted);font-size:.925rem}#runs-note:empty{display:none}
+#search{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto auto;gap:.75rem;align-items:end;margin-bottom:.75rem}
+button.secondary{color:var(--text);background:transparent;border:1px solid var(--border)}
+button.secondary:hover:not(:disabled){background:var(--border)}
+button:disabled{opacity:.45;cursor:default}
+#pager{display:flex;align-items:center;justify-content:center;gap:.9rem;margin-top:.9rem;color:var(--muted);font-size:.925rem}
+#pager[hidden]{display:none}#pager button{width:auto}
 .back{display:inline-block;margin-bottom:1rem;font-size:.925rem}
 .title{margin-bottom:1.5rem}.title .badge{margin-top:.6rem}
 .badge{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .65rem;border-radius:1rem;font-size:.8rem;font-weight:600;white-space:nowrap;background:var(--border);color:var(--text)}
@@ -54,7 +62,7 @@ th{color:var(--muted);font-size:.8rem;font-weight:600}
 pre{margin:0;background:#11141b;color:#d7dce5;border:1px solid #262b36;border-radius:.6rem;padding:1rem;min-height:12rem;max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;
 font:.85rem/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,"Noto Sans Mono CJK KR",monospace}
 pre:empty::before{content:"표시할 로그가 없습니다.";color:#8a93a3}
-@media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f{grid-template-columns:minmax(0,1fr)}button{width:100%}
+@media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f,#search{grid-template-columns:minmax(0,1fr)}button{width:100%}
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child{grid-column:1/-1}}
 </style>`;
@@ -71,19 +79,56 @@ ${style}
 </section>
 <section class="card"><h2>실시간 로그</h2><pre id="log" aria-live="polite"></pre></section>
 <section class="card"><h2>작업 기록</h2>
+<form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
+<label>날짜<input name="date" type="date"></label>
+<button>검색</button><button type="reset" class="secondary">초기화</button></form>
 <table class="runs"><thead><tr><th>제목</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
-<p id="runs-note"></p></section>
+<p id="runs-note" role="status"></p>
+<nav id="pager" aria-label="작업 기록 페이지" hidden><button id="prev" type="button" class="secondary">이전</button><span id="page-info"></span><button id="next" type="button" class="secondary">다음</button></nav></section>
 </main>
 <script>
 const log = document.getElementById('log');
 const runsEl = document.getElementById('runs');
 const runsNote = document.getElementById('runs-note');
+const searchForm = document.getElementById('search');
+const pager = document.getElementById('pager');
+const prev = document.getElementById('prev');
+const next = document.getElementById('next');
+const pageInfo = document.getElementById('page-info');
+let currentPage = 1;
+let filter = new URLSearchParams();
+let latestLoad = 0;
+// The server stores UTC but the list shows local time, so a picked date means that local day.
+function readFilter() {
+  const data = new FormData(searchForm);
+  const params = new URLSearchParams();
+  const q = data.get('q').trim();
+  if (q) params.set('q', q);
+  if (data.get('date')) {
+    const day = new Date(data.get('date') + 'T00:00:00');
+    params.set('from', day.toISOString());
+    day.setDate(day.getDate() + 1);
+    params.set('to', day.toISOString());
+  }
+  return params;
+}
 async function loadRuns() {
+  const load = ++latestLoad;
   try {
-    const res = await fetch('/runs');
+    const params = new URLSearchParams(filter);
+    params.set('page', currentPage);
+    const res = await fetch('/runs?' + params);
     if (!res.ok) throw new Error();
-    const runs = await res.json();
-    runsNote.textContent = runs.length ? '' : '작업 기록이 없습니다.';
+    const { runs, total, page, pageSize } = await res.json();
+    // A slower, older response must not overwrite the result of a newer search.
+    if (load !== latestLoad) return;
+    currentPage = page;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    pager.hidden = total <= pageSize;
+    pageInfo.textContent = page + ' / ' + lastPage + ' 페이지 (총 ' + total + '건)';
+    prev.disabled = page <= 1;
+    next.disabled = page >= lastPage;
+    runsNote.textContent = runs.length ? '' : (filter.size ? '검색 결과가 없습니다.' : '작업 기록이 없습니다.');
     runsEl.replaceChildren(...runs.map((r) => {
       const link = document.createElement('a');
       link.href = '/runs/' + r.id;
@@ -98,9 +143,23 @@ async function loadRuns() {
       return row;
     }));
   } catch {
-    runsNote.textContent = '작업 기록을 불러오지 못했습니다.';
+    if (load === latestLoad) runsNote.textContent = '작업 기록을 불러오지 못했습니다.';
   }
 }
+searchForm.onsubmit = (e) => {
+  e.preventDefault();
+  filter = readFilter();
+  currentPage = 1;
+  loadRuns();
+};
+// The reset event fires before the fields clear, so the filter is simply emptied here.
+searchForm.onreset = () => {
+  filter = new URLSearchParams();
+  currentPage = 1;
+  loadRuns();
+};
+prev.onclick = () => { currentPage -= 1; loadRuns(); };
+next.onclick = () => { currentPage += 1; loadRuns(); };
 const es = new EventSource('/events');
 es.onopen = () => { log.textContent = ''; loadRuns(); };
 es.addEventListener('runs', loadRuns);
@@ -137,7 +196,7 @@ ${style}
 <section class="card"><table class="meta">
 <tr><th>프로젝트</th><td>${escapeHtml(run.project)}</td></tr>
 <tr><th>브랜치</th><td>${escapeHtml(run.branch)}</td></tr>
-<tr><th>노션 문서</th><td><a href="${escapeHtml(run.url)}" rel="noreferrer">${escapeHtml(run.url)}</a></td></tr>
+<tr><th>노션 문서</th><td><a href="${escapeHtml(run.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.url)}</a></td></tr>
 <tr><th>시작</th><td><time datetime="${escapeHtml(run.started_at)}">${escapeHtml(run.started_at)}</time></td></tr>
 <tr><th>종료</th><td>${run.finished_at ? `<time datetime="${escapeHtml(run.finished_at)}">${escapeHtml(run.finished_at)}</time>` : '-'}</td></tr>
 </table></section>
@@ -213,7 +272,14 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       const lines = (buffered + chunk).split('\n');
       buffered = lines.pop();
       for (const line of lines.filter(Boolean)) {
-        try { const e = JSON.parse(line); if (e.type === 'result') result = e; } catch { /* plain text is shown as is */ }
+        try {
+          const e = JSON.parse(line);
+          if (e.type === 'result') {
+            result = e;
+            const summary = extractSummary(e.result);
+            if (summary) record(() => db.setSummary(runId, summary));
+          }
+        } catch { /* plain text is shown as is */ }
         const text = formatEvent(line);
         if (text) say(text);
       }
@@ -246,9 +312,13 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       req.on('close', () => clients.delete(res));
       return undefined;
     }
-    if (req.method === 'GET' && req.url === '/runs') {
+    const [pathname, query] = req.url.split('?', 2);
+    if (req.method === 'GET' && pathname === '/runs') {
+      const filter = parseRunFilter(new URLSearchParams(query));
+      if (!filter) return send(400, '잘못된 날짜입니다.');
+      const list = db.listRuns(filter);
       return res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-        .end(JSON.stringify(db.listRuns().map(runView)));
+        .end(JSON.stringify({ ...list, runs: list.runs.map(runView) }));
     }
     const detail = req.method === 'GET' && req.url.match(/^\/runs\/(\d{1,15})$/);
     if (detail) {

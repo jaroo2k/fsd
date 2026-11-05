@@ -4,9 +4,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
-const { isValidProject, parseNotionUrl, isLocalRequest } = require('./lib');
+const { isValidProject, parseNotionUrl, isLocalRequest, extractSummary, parseRunFilter } = require('./lib');
 const { createApp } = require('./server');
 const { openDb } = require('./db');
+const { DatabaseSync } = require('node:sqlite');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-'));
 const repo = path.join(tmp, 'repo');
@@ -96,7 +97,7 @@ async function recordRun(start, db = openDb(':memory:')) {
     });
     const res = await post();
     await closed;
-    const runs = await (await fetch(`${base}/runs`)).json();
+    const { runs } = await (await fetch(`${base}/runs`)).json();
     const detail = await (await fetch(`${base}/runs/${runs[0].id}`)).text();
     const again = await post();
     return { res, runs, detail, again };
@@ -189,6 +190,100 @@ test('runs survive a restart and unfinished ones become interrupted', () => {
   assert.deepStrictEqual(db.getLogs(done), ['로그']);
   assert.strictEqual(db.getRun(cut).status, 'interrupted');
   assert.ok(db.getRun(cut).finished_at);
-  assert.deepStrictEqual(db.listRuns().map((r) => r.id), [cut, done]);
+  assert.deepStrictEqual(db.listRuns().runs.map((r) => r.id), [cut, done]);
   db.close();
+});
+
+test('summary line is extracted from the final response', () => {
+  assert.strictEqual(extractSummary('끝났습니다.\n\n작업 요약: 검색 추가'), '검색 추가');
+  assert.strictEqual(extractSummary('**작업 요약:** `검색 추가`\n'), '검색 추가');
+  assert.strictEqual(extractSummary('작업 요약: 처음\n작업 요약: 마지막'), '마지막');
+  assert.strictEqual(extractSummary(`작업 요약: ${'가'.repeat(150)}`).length, 100);
+  assert.strictEqual(extractSummary('작업 요약:\n다음 줄'), null);
+  for (const none of ['요약 없음', '', undefined, null]) assert.strictEqual(extractSummary(none), null);
+});
+
+test('prompt asks for the summary line and the status change', () => {
+  const prompt = fs.readFileSync(path.join(__dirname, 'prompt.md'), 'utf8');
+  assert.ok(prompt.includes('`작업 요약: '));
+  assert.ok(prompt.includes('`상태` 속성을 `완료`로'));
+});
+
+test('run title is the summary from the result, escaped on the detail page', async () => {
+  const { runs, detail } = await recordRun(node(
+    "console.log(JSON.stringify({type:'result',is_error:false,result:'끝\\n작업 요약: 검색 <추가>'}));",
+  ));
+  assert.strictEqual(runs[0].title, '검색 <추가>');
+  assert.ok(detail.includes('<h1>검색 &#60;추가&#62;</h1>'));
+});
+
+test('notion link on the detail page opens a new window', async () => {
+  const { detail } = await recordRun(node("console.log(JSON.stringify({type:'result',is_error:false}));"));
+  assert.match(detail, /<a href="https:\/\/www\.notion\.so\/a" target="_blank" rel="noopener noreferrer">/);
+});
+
+test('an existing database gains summaries without losing rows', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runner-db-')), 'runner.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, url TEXT NOT NULL,
+    branch TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT);
+    INSERT INTO runs (project, url, branch, status, started_at) VALUES ('p', 'u', 'b', 'success', '2026-01-01T00:00:00.000Z');`);
+  old.close();
+
+  const db = openDb(file);
+  assert.strictEqual(db.getRun(1).title, 'p · b');
+  db.setSummary(1, '요약');
+  assert.strictEqual(db.getRun(1).title, '요약');
+  db.close();
+  openDb(file).close();
+});
+
+test('run list pages by 20 and filters by title and time', async () => {
+  const db = openDb(':memory:');
+  const ids = [];
+  for (let i = 1; i <= 45; i += 1) ids.push(db.createRun({ project: 'proj', url: 'u', branch: `b${i}` }));
+  db.setSummary(ids[0], '100%_검색 ADD');
+  const app = createApp({ root: tmp, db });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const list = async (query) => (await fetch(`${base}/runs?${new URLSearchParams(query)}`)).json();
+  try {
+    const first = await list({});
+    assert.strictEqual(first.runs.length, 20);
+    assert.strictEqual(first.total, 45);
+    assert.strictEqual(first.runs[0].id, ids[44]);
+
+    const third = await list({ page: 3 });
+    assert.strictEqual(third.runs.length, 5);
+    assert.strictEqual((await list({ page: 99 })).page, 3, 'past the end shows the last page');
+    for (const page of ['0', '-1', 'abc']) assert.strictEqual((await list({ page })).page, 1, page);
+
+    assert.deepStrictEqual((await list({ q: '검색 add' })).runs.map((r) => r.id), [ids[0]]);
+    assert.strictEqual((await list({ q: '100%_' })).total, 1);
+    assert.strictEqual((await list({ q: '%' })).total, 1, '% is not a wildcard');
+    assert.strictEqual((await list({ q: 'proj · b45' })).total, 1, 'default titles are searchable');
+    assert.strictEqual((await list({ q: '없는 제목' })).total, 0);
+
+    const today = new Date();
+    const later = new Date(today.getTime() + 86400000);
+    const hour = 3600000;
+    assert.strictEqual((await list({
+      from: new Date(today.getTime() - hour).toISOString(), to: later.toISOString(),
+    })).total, 45);
+    assert.strictEqual((await list({ from: later.toISOString() })).total, 0);
+    assert.strictEqual((await list({ to: new Date(today.getTime() - hour).toISOString() })).total, 0);
+    assert.strictEqual((await fetch(`${base}//`)).status, 404, 'odd paths do not crash the server');
+    assert.strictEqual((await fetch(`${base}/runs?from=yesterday`)).status, 400);
+    assert.strictEqual((await fetch(`${base}/runs?to=${encodeURIComponent("' OR 1=1")}`)).status, 400);
+  } finally {
+    app.closeAllConnections();
+    app.close();
+  }
+});
+
+test('run filter parsing', () => {
+  const parse = (query) => parseRunFilter(new URLSearchParams(query));
+  assert.deepStrictEqual(parse(''), { q: '', from: '', to: '', page: 1 });
+  assert.deepStrictEqual(parse('q=%20a%20&page=2'), { q: 'a', from: '', to: '', page: 2 });
+  assert.strictEqual(parse('from=2026-01-01'), null);
 });
