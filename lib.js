@@ -41,4 +41,12 @@ function formatEvent(line) {
   return null;
 }
 
-module.exports = { listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent };
+const STATUS_LABELS = { running: '실행 중', success: '완료', failed: '실패', interrupted: '중단됨' };
+
+const runView = (run) => ({
+  ...run,
+  title: `${run.project} · ${run.branch}`,
+  statusLabel: STATUS_LABELS[run.status] || run.status,
+});
+
+module.exports = { listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView };

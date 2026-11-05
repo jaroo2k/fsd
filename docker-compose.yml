@@ -7,8 +7,13 @@ services:
     environment:
       HOST: 0.0.0.0
       RUNNER_ROOT: /workspace
+      RUNNER_DB: /data/runner.db
       NOTION_TOKEN: ${NOTION_TOKEN:-}
     volumes:
       - D:/fsd:/workspace
+      - runner-data:/data
       - ${USERPROFILE}/.claude/.credentials.json:/home/node/.claude/.credentials.json
       - ${USERPROFILE}/.gitconfig:/home/node/.gitconfig:ro
+
+volumes:
+  runner-data:
