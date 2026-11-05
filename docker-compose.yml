@@ -9,11 +9,26 @@ services:
       RUNNER_ROOT: /workspace
       RUNNER_DB: /data/runner.db
       NOTION_TOKEN: ${NOTION_TOKEN:-}
+      DOCKER_HOST: tcp://docker:2375
     volumes:
       - D:/fsd:/workspace
       - runner-data:/data
       - ${USERPROFILE}/.claude/.credentials.json:/home/node/.claude/.credentials.json
       - ${USERPROFILE}/.gitconfig:/home/node/.gitconfig:ro
 
+  # Separate daemon so test runs cannot touch the host's containers. No ports published:
+  # the unauthenticated 2375 port is reachable only from this compose network.
+  docker:
+    image: docker:29-dind
+    restart: unless-stopped
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      # Same path as the runner, so bind mounts in project compose files resolve.
+      - D:/fsd:/workspace
+      - docker-data:/var/lib/docker
+
 volumes:
   runner-data:
+  docker-data:

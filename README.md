@@ -23,7 +23,13 @@ docker compose up -d --build
 
 DB 위치는 `RUNNER_DB` 환경 변수로 정하며, 기본값은 이 폴더의 `runner.db`입니다. Docker에서는 `runner-data` 볼륨의 `/data/runner.db`에 저장되어 컨테이너를 다시 만들어도 유지됩니다. 기록을 지우려면 `docker compose down -v`로 볼륨을 삭제합니다.
 
+## 테스트 환경
+
+러너 이미지에는 Python, pytest, Docker CLI와 Compose, Playwright와 Chromium이 들어 있습니다. Docker 명령은 호스트가 아니라 별도의 `docker` 서비스에서 실행되므로 호스트의 컨테이너에는 접근하지 않습니다. 프로젝트에서 공개한 포트는 `docker` 호스트로 접속합니다. 받은 이미지는 `docker-data` 볼륨에 쌓이며, 이 볼륨도 `docker compose down -v`로 지워집니다.
+
 ## 주의
+
+`docker` 서비스는 `privileged`로 실행됩니다. 호스트 컨테이너와는 분리되지만, 악성 지시가 실행되면 이 서비스를 통해 Docker VM 수준의 권한을 얻을 수 있습니다.
 
 작업 로그에는 Claude의 응답과 표준 오류 출력이 그대로 저장됩니다. 비밀 값이 출력되면 DB에도 남을 수 있습니다.
 
