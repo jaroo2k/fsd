@@ -159,6 +159,22 @@ test('run detail page escapes stored values and 404s unknown ids', async () => {
   }
 });
 
+test('event stream opens before any log line exists', async () => {
+  const app = createApp({ root: tmp });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const controller = new AbortController();
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.address().port}/events`, {
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(2000)]),
+    });
+    assert.strictEqual(res.status, 200);
+  } finally {
+    controller.abort();
+    app.closeAllConnections();
+    app.close();
+  }
+});
+
 test('runs survive a restart and unfinished ones become interrupted', () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runner-db-')), 'runner.db');
   let db = openDb(file);

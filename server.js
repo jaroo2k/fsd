@@ -5,25 +5,75 @@ const { spawn, execFileSync } = require('node:child_process');
 const { listProjects, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView } = require('./lib');
 const { openDb } = require('./db');
 
-const style = `<style>body{font:16px system-ui;max-width:800px;margin:2rem auto;padding:0 1rem}label{display:block;margin:.75rem 0}
-input,select{display:block;width:100%;box-sizing:border-box;padding:.5rem}button{padding:.5rem 1rem}
-#status{font-weight:600}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem;border-bottom:1px solid #ddd;overflow-wrap:anywhere}
-.badge{display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.85rem;white-space:nowrap;background:#e5e5e5;color:#222}
-.running{background:#cfe2ff;color:#052c65}.success{background:#d1e7dd;color:#0a3622}.failed{background:#f8d7da;color:#58151c}
-pre{background:#111;color:#eee;padding:1rem;min-height:12rem;max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}</style>`;
+const style = `<style>
+:root{color-scheme:light dark;--bg:#f5f6fa;--surface:#fff;--border:#e3e6ee;--text:#1c2130;--muted:#5d6678;
+--accent:#4f46e5;--accent-hover:#4338ca;--on-accent:#fff;--field:#fff;--ok:#166534;--err:#b42318;
+--running-bg:#e0e7ff;--running:#3730a3;--success-bg:#dcfce7;--success:#166534;--failed-bg:#fee2e2;--failed:#991b1b;
+--interrupted-bg:#fef3c7;--interrupted:#92400e;--shadow:0 1px 2px rgb(16 24 40 / .05),0 4px 16px rgb(16 24 40 / .05)}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--surface:#171b23;--border:#2a303c;--text:#e7eaf0;--muted:#a0a9b8;
+--accent:#a5b4fc;--accent-hover:#c7d2fe;--on-accent:#14172b;--field:#10131a;--ok:#86efac;--err:#fca5a5;
+--running-bg:#272c5c;--running:#c7d2fe;--success-bg:#12351f;--success:#86efac;--failed-bg:#451a1a;--failed:#fca5a5;
+--interrupted-bg:#42300d;--interrupted:#fcd34d;--shadow:none}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);word-break:keep-all;
+font:16px/1.5 system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",sans-serif}
+main{max-width:960px;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+h1{margin:0;font-size:1.6rem;line-height:1.3;letter-spacing:-.02em;overflow-wrap:anywhere}
+h2{margin:0 0 .85rem;font-size:1.05rem}
+.brand{display:flex;align-items:center;gap:.9rem;margin-bottom:1.75rem}
+.brand p{margin:.1rem 0 0;color:var(--muted);font-size:.95rem}
+.mark{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:.8rem;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;box-shadow:var(--shadow);padding:1.25rem;margin-bottom:1.25rem}
+#f{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:1rem;align-items:end}
+label{display:block;font-size:.875rem;font-weight:600}
+input,select{display:block;width:100%;height:2.75rem;margin-top:.4rem;padding:0 .8rem;font:inherit;font-weight:400;color:inherit;background:var(--field);border:1px solid var(--border);border-radius:.6rem}
+input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{height:2.75rem;padding:0 1.5rem;font:inherit;font-weight:600;color:var(--on-accent);background:var(--accent);border:0;border-radius:.6rem;cursor:pointer;transition:background .15s}
+button:hover{background:var(--accent-hover)}
+#status{margin:.9rem 0 0;font-size:.925rem;font-weight:600}#status:empty{display:none}
+#status.ok{color:var(--ok)}#status.err{color:var(--err)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:.7rem .5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+tr:last-child>td,tr:last-child>th{border-bottom:0}
+th{color:var(--muted);font-size:.8rem;font-weight:600}
+.runs td:nth-child(n+2){white-space:nowrap}.runs td:last-child{color:var(--muted);font-size:.9rem}
+.runs tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.meta th{width:6.5rem;vertical-align:top;padding-top:.85rem}
+#runs-note{margin:.75rem .5rem 0;color:var(--muted);font-size:.925rem}#runs-note:empty{display:none}
+.back{display:inline-block;margin-bottom:1rem;font-size:.925rem}
+.title{margin-bottom:1.5rem}.title .badge{margin-top:.6rem}
+.badge{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .65rem;border-radius:1rem;font-size:.8rem;font-weight:600;white-space:nowrap;background:var(--border);color:var(--text)}
+.badge::before{content:"";width:.45rem;height:.45rem;border-radius:50%;background:currentColor}
+.running{background:var(--running-bg);color:var(--running)}.running::before{animation:pulse 1.4s ease-in-out infinite}
+.success{background:var(--success-bg);color:var(--success)}
+.failed{background:var(--failed-bg);color:var(--failed)}
+.interrupted{background:var(--interrupted-bg);color:var(--interrupted)}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.running::before{animation:none}button{transition:none}}
+pre{margin:0;background:#11141b;color:#d7dce5;border:1px solid #262b36;border-radius:.6rem;padding:1rem;min-height:12rem;max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;
+font:.85rem/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,"Noto Sans Mono CJK KR",monospace}
+pre:empty::before{content:"표시할 로그가 없습니다.";color:#8a93a3}
+@media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f{grid-template-columns:minmax(0,1fr)}button{width:100%}
+.runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
+.runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child{grid-column:1/-1}}
+</style>`;
 
 const page = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>노션 개발 러너</title>
 ${style}
-<h1>노션 개발 러너</h1>
+<main>
+<header class="brand"><span class="mark" aria-hidden="true">N</span><div><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></div></header>
+<section class="card">
 <form id="f"><label>프로젝트<select name="project" required><option value="">선택하세요</option>${projects.map((p) => `<option>${escapeHtml(p)}</option>`).join('')}</select></label>
-<label>노션 링크<input name="url" type="url" required></label><button>시작</button></form>
+<label>노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..." required></label><button>시작</button></form>
 <p id="status" role="status"></p>
-<pre id="log" aria-live="polite"></pre>
-<h2>작업 기록</h2>
-<table><thead><tr><th>제목</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
-<p id="runs-note"></p>
+</section>
+<section class="card"><h2>실시간 로그</h2><pre id="log" aria-live="polite"></pre></section>
+<section class="card"><h2>작업 기록</h2>
+<table class="runs"><thead><tr><th>제목</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
+<p id="runs-note"></p></section>
+</main>
 <script>
 const log = document.getElementById('log');
 const runsEl = document.getElementById('runs');
@@ -64,11 +114,14 @@ es.onmessage = (e) => {
 document.getElementById('f').onsubmit = async (e) => {
   e.preventDefault();
   const body = JSON.stringify(Object.fromEntries(new FormData(e.target)));
+  status.className = '';
   status.textContent = '요청 중...';
   try {
     const res = await fetch('/run', { method: 'POST', body });
+    status.className = res.ok ? 'ok' : 'err';
     status.textContent = (res.ok ? '' : '거부됨: ') + (await res.text());
   } catch {
+    status.className = 'err';
     status.textContent = '서버에 연결하지 못했습니다.';
   }
 };
@@ -78,18 +131,18 @@ const detailPage = (run, logs) => `<!doctype html><html lang="ko"><meta charset=
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(run.title)}</title>
 ${run.status === 'running' ? '<meta http-equiv="refresh" content="3">' : ''}
 ${style}
-<p><a href="/">← 목록</a></p>
-<h1>${escapeHtml(run.title)}</h1>
-<p><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></p>
-<table>
+<main>
+<a class="back" href="/">← 목록</a>
+<header class="title"><h1>${escapeHtml(run.title)}</h1><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></header>
+<section class="card"><table class="meta">
 <tr><th>프로젝트</th><td>${escapeHtml(run.project)}</td></tr>
 <tr><th>브랜치</th><td>${escapeHtml(run.branch)}</td></tr>
 <tr><th>노션 문서</th><td><a href="${escapeHtml(run.url)}" rel="noreferrer">${escapeHtml(run.url)}</a></td></tr>
 <tr><th>시작</th><td><time datetime="${escapeHtml(run.started_at)}">${escapeHtml(run.started_at)}</time></td></tr>
 <tr><th>종료</th><td>${run.finished_at ? `<time datetime="${escapeHtml(run.finished_at)}">${escapeHtml(run.finished_at)}</time>` : '-'}</td></tr>
-</table>
-<h2>작업 내용</h2>
-<pre>${escapeHtml(logs.join('\n'))}</pre>
+</table></section>
+<section class="card"><h2>작업 내용</h2><pre>${escapeHtml(logs.join('\n'))}</pre></section>
+</main>
 <script>
 for (const t of document.querySelectorAll('time')) t.textContent = new Date(t.dateTime).toLocaleString();
 </script></html>`;
@@ -186,6 +239,8 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     }
     if (req.method === 'GET' && req.url === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+      // Without this the browser sees no open event until the first log line, and the run list stays empty.
+      res.flushHeaders();
       for (const text of log) res.write(`data: ${JSON.stringify(text)}\n\n`);
       clients.add(res);
       req.on('close', () => clients.delete(res));
