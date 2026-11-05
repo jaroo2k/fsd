@@ -290,20 +290,27 @@ test('run filter parsing', () => {
 
 test('project settings are validated, grouped and escaped', () => {
   const names = ['a', 'b', 'c'];
-  const { parseProjectSettings, projectView, projectOptions } = require('./lib');
+  const { parseProjectSettings, projectView, projectOptions, parseGroupName, groupOptions, groupItems } = require('./lib');
   const row = (over) => ({ name: 'a', alias: '', group: '', ...over });
-  assert.deepStrictEqual(parseProjectSettings([row({ alias: ' x ', group: '미분류' })], names), [{ name: 'a', alias: 'x', group: '' }]);
-  for (const bad of [null, {}, [null], [row({ name: '../a' })], [row({ alias: 1 })], [row({ group: 'x'.repeat(51) })]]) {
-    assert.strictEqual(parseProjectSettings(bad, names), null);
+  const parse = (input) => parseProjectSettings(input, names, ['팀']);
+  assert.deepStrictEqual(parse([row({ alias: ' x ', group: '미분류' })]), [{ name: 'a', alias: 'x', group: '' }]);
+  assert.deepStrictEqual(parse([row({ group: ' 팀 ' })]), [{ name: 'a', alias: '', group: '팀' }]);
+  for (const bad of [null, {}, [null], [row({ name: '../a' })], [row({ alias: 1 })], [row({ alias: 'x'.repeat(51) })], [row({ group: '없는 그룹' })]]) {
+    assert.strictEqual(parse(bad), null);
   }
+  assert.strictEqual(parseGroupName(' 팀 '), '팀');
+  for (const bad of [undefined, 1, '', '  ', '미분류', 'x'.repeat(51)]) assert.strictEqual(parseGroupName(bad), null);
   const view = projectView(names, [
     { name: 'a', alias: '<A>', group_name: '팀' },
-    { name: 'gone', alias: 'x', group_name: '없는 그룹' },
-  ]);
-  assert.deepStrictEqual(view.groups, ['팀']);
+    { name: 'gone', alias: 'x', group_name: '다른 팀' },
+  ], ['팀', '빈 그룹']);
+  assert.deepStrictEqual(view.groups, ['빈 그룹', '팀']);
   const html = projectOptions(view);
   assert.ok(html.includes('<optgroup label="팀"><option value="a">&#60;A&#62;</option></optgroup>'));
   assert.ok(html.includes('<optgroup label="미분류"><option value="b">b</option><option value="c">c</option></optgroup>'));
+  assert.ok(!html.includes('빈 그룹'), 'a group with no projects adds nothing to the run form');
+  assert.strictEqual(groupOptions(['<팀>'], '<팀>'), '<option value="">미분류</option><option value="&#60;팀&#62;" selected>&#60;팀&#62;</option>');
+  assert.ok(!groupItems(['<팀>']).includes('<팀>'));
 });
 
 test('project settings save, survive a restart and only change labels', async () => {
@@ -317,15 +324,18 @@ test('project settings save, survive a restart and only change labels', async ()
     method: 'POST', headers: { Origin: origin }, body: JSON.stringify(body),
   });
   try {
+    db.addGroup('팀');
     assert.strictEqual((await save([], 'https://evil.com')).status, 403);
     assert.strictEqual((await save([{ name: '../x', alias: 'a', group: '' }])).status, 400);
+    assert.strictEqual((await save([{ name: 'repo', alias: 'a', group: '없는 그룹' }])).status, 400);
+    assert.strictEqual(db.getProjectSettings('repo'), undefined);
     const saved = await save([{ name: 'repo', alias: '<저장소>', group: '팀' }]);
     assert.strictEqual(saved.status, 200);
-    const { options, groups } = await saved.json();
-    assert.deepStrictEqual(groups, ['팀']);
-    assert.ok(options.includes('<option value="repo">&#60;저장소&#62;</option>'));
     const home = await (await fetch(base)).text();
-    assert.ok(home.includes('value="&#60;저장소&#62;"') && !home.includes('<저장소>'));
+    assert.ok(home.includes('<optgroup label="팀"><option value="repo">&#60;저장소&#62;</option>') && !home.includes('<저장소>'));
+    const manage = await (await fetch(`${base}/projects`)).text();
+    assert.ok(manage.includes('value="&#60;저장소&#62;"') && !manage.includes('<저장소>'));
+    assert.ok(manage.includes('<option value="팀" selected>'));
     const detail = await (await fetch(`${base}/runs/${runId}`)).text();
     assert.ok(detail.includes('&#60;저장소&#62; (repo)'));
   } finally {
@@ -337,5 +347,81 @@ test('project settings save, survive a restart and only change labels', async ()
   assert.strictEqual(db.getProjectSettings('repo').group_name, '팀');
   db.saveProjectSettings([{ name: 'repo', alias: '', group: '' }]);
   assert.strictEqual(db.getProjectSettings('repo').alias, null);
+  db.close();
+});
+
+test('project management is its own page, linked from the home page', async () => {
+  const app = createApp({ root: tmp });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  try {
+    const home = await fetch(base);
+    assert.strictEqual(home.headers.get('cache-control'), 'no-store');
+    const homeHtml = await home.text();
+    assert.ok(homeHtml.includes('href="/projects"'));
+    assert.ok(!homeHtml.includes('id="projects"') && !homeHtml.includes('name="alias"'));
+    const manage = await (await fetch(`${base}/projects`)).text();
+    assert.ok(manage.includes('id="projects"') && manage.includes('id="group-form"'));
+    assert.ok(manage.includes('<select name="group"') && !manage.includes('datalist'));
+    assert.ok(manage.includes('href="/"'));
+  } finally {
+    app.closeAllConnections();
+    app.close();
+  }
+});
+
+test('groups can be added and deleted, and deleting moves projects to ungrouped', async () => {
+  const db = openDb(':memory:');
+  const app = createApp({ root: tmp, db });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const post = (url, body, origin = base) => fetch(base + url, {
+    method: 'POST', headers: { Origin: origin }, body: JSON.stringify(body),
+  });
+  try {
+    assert.strictEqual((await post('/groups', { name: '팀' }, 'https://evil.com')).status, 403);
+    assert.strictEqual((await post('/groups/delete', { name: '팀' }, 'https://evil.com')).status, 403);
+    assert.strictEqual((await post('/groups', { name: '미분류' })).status, 400);
+    assert.strictEqual((await post('/groups', null)).status, 400);
+    const added = await post('/groups', { name: ' <팀> ' });
+    assert.strictEqual(added.status, 200);
+    const body = await added.json();
+    assert.deepStrictEqual(body.groups, ['<팀>']);
+    assert.ok(body.options.includes('value="&#60;팀&#62;"') && !body.items.includes('<팀>'));
+    assert.strictEqual((await post('/groups', { name: '<팀>' })).status, 409);
+    assert.strictEqual((await post('/groups', { name: '다른 팀' })).status, 200);
+
+    // A group stays selectable even while no project uses it.
+    assert.ok((await (await fetch(`${base}/projects`)).text()).includes('<option value="다른 팀">'));
+
+    await post('/projects', [{ name: 'repo', alias: '별칭', group: '<팀>' }, { name: 'plain', alias: '', group: '다른 팀' }]);
+    assert.strictEqual((await post('/groups/delete', { name: '없는 그룹' })).status, 404);
+    assert.strictEqual((await post('/groups/delete', {})).status, 404);
+    const deleted = await post('/groups/delete', { name: '<팀>' });
+    assert.strictEqual(deleted.status, 200);
+    assert.deepStrictEqual((await deleted.json()).groups, ['다른 팀']);
+    assert.strictEqual(db.getProjectSettings('repo').group_name, null);
+    assert.strictEqual(db.getProjectSettings('repo').alias, '별칭');
+    assert.strictEqual(db.getProjectSettings('plain').group_name, '다른 팀');
+  } finally {
+    app.closeAllConnections();
+    app.close();
+    db.close();
+  }
+});
+
+test('groups already on projects carry over, and a deleted one stays deleted after a restart', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runner-db-')), 'runner.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE projects (name TEXT PRIMARY KEY, alias TEXT, group_name TEXT);
+    INSERT INTO projects VALUES ('a', NULL, '팀'), ('b', NULL, '팀'), ('c', NULL, NULL);`);
+  old.close();
+  let db = openDb(file);
+  assert.deepStrictEqual(db.listGroups(), ['팀']);
+  assert.strictEqual(db.deleteGroup('팀'), true);
+  db.close();
+  db = openDb(file);
+  assert.deepStrictEqual(db.listGroups(), []);
+  assert.strictEqual(db.getProjectSettings('a').group_name, null);
   db.close();
 });

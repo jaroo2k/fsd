@@ -28,6 +28,12 @@ function openDb(file) {
       alias TEXT,
       group_name TEXT
     );
+    CREATE TABLE IF NOT EXISTS project_groups (
+      name TEXT PRIMARY KEY
+    );
+    -- Groups used to exist only as a value on projects. Deleting a group clears those values, so this can't revive one.
+    INSERT OR IGNORE INTO project_groups (name)
+      SELECT DISTINCT group_name FROM projects WHERE group_name IS NOT NULL;
   `);
   // Databases created before summaries existed keep their rows; those fall back to the default title.
   if (!db.prepare('PRAGMA table_info(runs)').all().some((column) => column.name === 'summary')) {
@@ -52,6 +58,21 @@ function openDb(file) {
     ON CONFLICT(name) DO UPDATE SET alias = excluded.alias, group_name = excluded.group_name`);
   const selectProjects = db.prepare('SELECT * FROM projects');
   const selectProject = db.prepare('SELECT * FROM projects WHERE name = ?');
+  const selectGroups = db.prepare('SELECT name FROM project_groups');
+  const insertGroup = db.prepare('INSERT OR IGNORE INTO project_groups (name) VALUES (?)');
+  const removeGroup = db.prepare('DELETE FROM project_groups WHERE name = ?');
+  const clearGroup = db.prepare('UPDATE projects SET group_name = NULL WHERE group_name = ?');
+  const transaction = (work) => {
+    db.exec('BEGIN');
+    try {
+      const result = work();
+      db.exec('COMMIT');
+      return result;
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  };
 
   return {
     createRun: ({ project, url, branch }) => Number(insertRun.run(project, url, branch, now()).lastInsertRowid),
@@ -72,16 +93,16 @@ function openDb(file) {
     listProjectSettings: () => selectProjects.all(),
     getProjectSettings: (name) => selectProject.get(name),
     // All or nothing, so a failed save never leaves the form half applied.
-    saveProjectSettings: (settings) => {
-      db.exec('BEGIN');
-      try {
-        for (const { name, alias, group } of settings) upsertProject.run(name, alias || null, group || null);
-        db.exec('COMMIT');
-      } catch (err) {
-        db.exec('ROLLBACK');
-        throw err;
-      }
-    },
+    saveProjectSettings: (settings) => transaction(() => {
+      for (const { name, alias, group } of settings) upsertProject.run(name, alias || null, group || null);
+    }),
+    listGroups: () => selectGroups.all().map((row) => row.name),
+    // Both return false when nothing changed: the group already exists, or is already gone.
+    addGroup: (name) => Number(insertGroup.run(name).changes) > 0,
+    deleteGroup: (name) => transaction(() => {
+      clearGroup.run(name);
+      return Number(removeGroup.run(name).changes) > 0;
+    }),
     close: () => db.close(),
   };
 }

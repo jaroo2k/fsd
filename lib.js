@@ -16,7 +16,7 @@ const UNGROUPED = '미분류';
 const MAX_SETTING_LENGTH = 50;
 
 // Returns the cleaned settings, or null when any row is invalid so nothing gets saved.
-function parseProjectSettings(input, names) {
+function parseProjectSettings(input, names, groups) {
   if (!Array.isArray(input)) return null;
   const settings = [];
   for (const row of input) {
@@ -24,21 +24,29 @@ function parseProjectSettings(input, names) {
     const alias = row.alias.trim();
     const group = row.group.trim();
     if (alias.length > MAX_SETTING_LENGTH || group.length > MAX_SETTING_LENGTH) return null;
-    settings.push({ name: row.name, alias, group: group === UNGROUPED ? '' : group });
+    const groupName = group === UNGROUPED ? '' : group;
+    if (groupName && !groups.includes(groupName)) return null;
+    settings.push({ name: row.name, alias, group: groupName });
   }
   return settings;
 }
 
+// Returns the cleaned name, or null when it can't be a group. UNGROUPED is the "no group" label.
+function parseGroupName(value) {
+  if (typeof value !== 'string') return null;
+  const name = value.trim();
+  return name && name.length <= MAX_SETTING_LENGTH && name !== UNGROUPED ? name : null;
+}
+
 // Folders are the source of truth: settings of a removed folder are simply not shown.
-function projectView(names, settings) {
+function projectView(names, settings, groups) {
   const byName = new Map(settings.map((s) => [s.name, s]));
   const rows = names.map((name) => ({
     name,
     alias: byName.get(name)?.alias || '',
     group: byName.get(name)?.group_name || '',
   }));
-  const groups = [...new Set(rows.map((r) => r.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  return { rows, groups };
+  return { rows, groups: [...groups].sort((a, b) => a.localeCompare(b)) };
 }
 
 function projectOptions({ rows, groups }) {
@@ -50,6 +58,13 @@ function projectOptions({ rows, groups }) {
   };
   return `<option value="">선택하세요</option>${groups.map((g) => optgroup(g, g)).join('')}${optgroup(UNGROUPED, '')}`;
 }
+
+function groupOptions(groups, selected = '') {
+  const option = (value, label) => `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  return option('', UNGROUPED) + groups.map((g) => option(g, g)).join('');
+}
+
+const groupItems = (groups) => groups.map((g) => `<li data-group="${escapeHtml(g)}"><span>${escapeHtml(g)}</span><button type="button" class="secondary" aria-label="${escapeHtml(g)} 삭제">삭제</button></li>`).join('');
 
 function parseNotionUrl(value) {
   let url;
@@ -109,5 +124,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, parseProjectSettings, projectView, projectOptions, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED,
 };

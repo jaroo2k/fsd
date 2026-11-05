@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const {
-  listProjects, parseProjectSettings, projectView, projectOptions, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED,
 } = require('./lib');
 const { openDb } = require('./db');
 
@@ -25,6 +25,7 @@ h1{margin:0;font-size:1.6rem;line-height:1.3;letter-spacing:-.02em;overflow-wrap
 h2{margin:0 0 .85rem;font-size:1.05rem}
 .brand{display:flex;align-items:center;gap:.9rem;margin-bottom:1.75rem}
 .brand p{margin:.1rem 0 0;color:var(--muted);font-size:.95rem}
+.brand .nav{flex:none;margin-left:auto;font-size:.925rem;font-weight:600;white-space:nowrap}
 .mark{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:.8rem;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;box-shadow:var(--shadow);padding:1.25rem;margin-bottom:1.25rem}
 #f{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:1rem;align-items:end}
@@ -35,9 +36,16 @@ input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,su
 button{height:2.75rem;padding:0 1.5rem;font:inherit;font-weight:600;color:var(--on-accent);background:var(--accent);border:0;border-radius:.6rem;cursor:pointer;transition:background .15s}
 button:hover{background:var(--accent-hover)}
 #status{margin:.9rem 0 0;font-size:.925rem;font-weight:600}#status:empty{display:none}
-#status.ok,#projects-note.ok{color:var(--ok)}#status.err,#projects-note.err{color:var(--err)}
-.projects input{margin-top:0}.project-actions{display:flex;align-items:center;gap:.9rem;margin-top:.75rem}
-#projects-note{margin:0;font-size:.925rem;font-weight:600}
+#status.ok,.note.ok{color:var(--ok)}#status.err,.note.err{color:var(--err)}
+.projects{table-layout:fixed}.projects th:first-child{width:30%}.projects input,.projects select{margin-top:0}.project-actions{display:flex;align-items:center;gap:.9rem;margin-top:.75rem}
+.note{margin:0;font-size:.925rem;font-weight:600}
+#group-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.75rem;align-items:end}
+#groups-note{margin-top:.75rem}#groups-note:empty{display:none}
+#group-list{list-style:none;margin:.9rem 0 0;padding:0}
+#group-list:empty::before{content:"그룹이 없습니다.";color:var(--muted);font-size:.925rem}
+#group-list li{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+#group-list li:last-child{border-bottom:0}
+#group-list button{flex:none;width:auto;height:2.25rem;padding:0 .9rem;font-size:.875rem}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:.7rem .5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
 tr:last-child>td,tr:last-child>th{border-bottom:0}
@@ -65,30 +73,25 @@ button:disabled{opacity:.45;cursor:default}
 pre{margin:0;background:#11141b;color:#d7dce5;border:1px solid #262b36;border-radius:.6rem;padding:1rem;min-height:12rem;max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;
 font:.85rem/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,"Noto Sans Mono CJK KR",monospace}
 pre:empty::before{content:"표시할 로그가 없습니다.";color:#8a93a3}
-@media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f,#search{grid-template-columns:minmax(0,1fr)}button{width:100%}
+@media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f,#search,#group-form{grid-template-columns:minmax(0,1fr)}button{width:100%}
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
-.runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child{grid-column:1/-1}}
+.runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child{grid-column:1/-1}
+.brand{flex-wrap:wrap}.brand>div{flex:1 1 calc(100% - 3.65rem)}.brand .nav{margin-left:3.65rem}
+.projects thead{display:none}.projects tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
+.projects tr:last-child{border-bottom:0}.projects td{padding:0;border:0}.projects td:first-child{grid-column:1/-1;font-weight:600}}
 </style>`;
 
 const page = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>노션 개발 러너</title>
 ${style}
 <main>
-<header class="brand"><span class="mark" aria-hidden="true">N</span><div><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></div></header>
+<header class="brand"><span class="mark" aria-hidden="true">N</span><div><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></div><a class="nav" href="/projects">프로젝트 관리</a></header>
 <section class="card">
 <form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
 <label>노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..." required></label><button>시작</button></form>
 <p id="status" role="status"></p>
 </section>
 <details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
-<details class="card"><summary><h2>프로젝트 관리</h2></summary>
-<form id="projects"><table class="projects"><thead><tr><th>폴더</th><th>별칭</th><th>그룹</th></tr></thead><tbody>
-${projects.rows.map((r) => `<tr data-name="${escapeHtml(r.name)}"><td>${escapeHtml(r.name)}</td>
-<td><input name="alias" maxlength="50" aria-label="${escapeHtml(r.name)} 별칭" value="${escapeHtml(r.alias)}"></td>
-<td><input name="group" maxlength="50" list="group-names" aria-label="${escapeHtml(r.name)} 그룹" value="${escapeHtml(r.group)}"></td></tr>`).join('')}
-</tbody></table>
-<datalist id="group-names">${projects.groups.map((g) => `<option value="${escapeHtml(g)}"></option>`).join('')}</datalist>
-<div class="project-actions"><button>저장</button><p id="projects-note" role="status"></p></div></form></details>
 <section class="card"><h2>작업 기록</h2>
 <form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
 <label>날짜<input name="date" type="date"></label>
@@ -177,33 +180,6 @@ const es = new EventSource('/events');
 es.onopen = () => { log.textContent = ''; loadRuns(); };
 es.addEventListener('runs', loadRuns);
 const status = document.getElementById('status');
-const projectForm = document.getElementById('projects');
-const projectNote = document.getElementById('projects-note');
-projectForm.onsubmit = async (e) => {
-  e.preventDefault();
-  const body = JSON.stringify([...projectForm.querySelectorAll('tr[data-name]')].map((row) => ({
-    name: row.dataset.name,
-    alias: row.querySelector('[name=alias]').value,
-    group: row.querySelector('[name=group]').value,
-  })));
-  projectNote.className = '';
-  projectNote.textContent = '저장 중...';
-  try {
-    const res = await fetch('/projects', { method: 'POST', body });
-    if (!res.ok) throw new Error(await res.text());
-    const { options, groups } = await res.json();
-    const select = document.querySelector('select[name=project]');
-    const selected = select.value;
-    select.innerHTML = options;
-    select.value = selected;
-    document.getElementById('group-names').replaceChildren(...groups.map((g) => new Option(g)));
-    projectNote.className = 'ok';
-    projectNote.textContent = '저장했습니다.';
-  } catch (err) {
-    projectNote.className = 'err';
-    projectNote.textContent = '저장하지 못했습니다. ' + err.message;
-  }
-};
 es.onmessage = (e) => {
   const text = JSON.parse(e.data);
   if (text.startsWith('시작: ')) log.textContent = '';
@@ -222,6 +198,88 @@ document.getElementById('f').onsubmit = async (e) => {
   } catch {
     status.className = 'err';
     status.textContent = '서버에 연결하지 못했습니다.';
+  }
+};
+</script></html>`;
+
+const projectsPage = ({ rows, groups }) => `<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>프로젝트 관리 - 노션 개발 러너</title>
+${style}
+<main>
+<a class="back" href="/">← 목록</a>
+<header class="title"><h1>프로젝트 관리</h1></header>
+<section class="card"><h2>그룹</h2>
+<form id="group-form"><label>새 그룹<input name="name" maxlength="50" required></label><button>추가</button></form>
+<p id="groups-note" class="note" role="status"></p>
+<ul id="group-list">${groupItems(groups)}</ul></section>
+<section class="card"><h2>프로젝트</h2>
+<form id="projects"><table class="projects"><thead><tr><th>폴더</th><th>별칭</th><th>그룹</th></tr></thead><tbody>
+${rows.map((r) => `<tr data-name="${escapeHtml(r.name)}"><td>${escapeHtml(r.name)}</td>
+<td><input name="alias" maxlength="50" placeholder="별칭" aria-label="${escapeHtml(r.name)} 별칭" value="${escapeHtml(r.alias)}"></td>
+<td><select name="group" aria-label="${escapeHtml(r.name)} 그룹">${groupOptions(groups, r.group)}</select></td></tr>`).join('')}
+</tbody></table>
+<div class="project-actions"><button>저장</button><p id="projects-note" class="note" role="status"></p></div></form></section>
+</main>
+<script>
+const groupForm = document.getElementById('group-form');
+const groupList = document.getElementById('group-list');
+const groupsNote = document.getElementById('groups-note');
+const projectForm = document.getElementById('projects');
+const projectNote = document.getElementById('projects-note');
+function note(el, kind, text) {
+  el.className = 'note ' + kind;
+  el.textContent = text;
+}
+async function post(url, body) {
+  const res = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(await res.text());
+  return res;
+}
+// Choices not saved yet stay selected, except the ones pointing at a group that no longer exists.
+function showGroups({ groups, options, items }) {
+  groupList.innerHTML = items;
+  for (const select of projectForm.querySelectorAll('select[name=group]')) {
+    const selected = select.value;
+    select.innerHTML = options;
+    select.value = groups.includes(selected) ? selected : '';
+  }
+}
+groupForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const name = groupForm.elements.name.value;
+  try {
+    showGroups(await (await post('/groups', { name })).json());
+    groupForm.reset();
+    note(groupsNote, 'ok', '추가했습니다.');
+  } catch (err) {
+    note(groupsNote, 'err', '추가하지 못했습니다. ' + err.message);
+  }
+};
+groupList.onclick = async (e) => {
+  const item = e.target.closest('button') && e.target.closest('li');
+  if (!item) return;
+  const name = item.dataset.group;
+  if (!confirm('"' + name + '" 그룹을 삭제할까요? 이 그룹의 프로젝트는 미분류로 옮겨집니다.')) return;
+  try {
+    showGroups(await (await post('/groups/delete', { name })).json());
+    note(groupsNote, 'ok', '삭제했습니다.');
+  } catch (err) {
+    note(groupsNote, 'err', '삭제하지 못했습니다. ' + err.message);
+  }
+};
+projectForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const body = [...projectForm.querySelectorAll('tr[data-name]')].map((row) => ({
+    name: row.dataset.name,
+    alias: row.querySelector('[name=alias]').value,
+    group: row.querySelector('[name=group]').value,
+  }));
+  note(projectNote, '', '저장 중...');
+  try {
+    await post('/projects', body);
+    note(projectNote, 'ok', '저장했습니다.');
+  } catch (err) {
+    note(projectNote, 'err', '저장하지 못했습니다. ' + err.message);
   }
 };
 </script></html>`;
@@ -334,7 +392,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
 
   return http.createServer((req, res) => {
     const port = req.socket.localPort;
-    const projects = () => projectView(listProjects(root), db.listProjectSettings());
+    const projects = () => projectView(listProjects(root), db.listProjectSettings(), db.listGroups());
     const send = (status, text) => {
       res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' }).end(text);
     };
@@ -342,7 +400,8 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     if (!isLocalRequest(req.headers, port, isPost)) return send(403, '로컬 요청만 허용합니다.');
 
     if (req.method === 'GET' && req.url === '/') {
-      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page(projects()));
+      // no-store: returning from the management page must show the saved project names.
+      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(page(projects()));
     }
     if (req.method === 'GET' && req.url === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
@@ -354,6 +413,9 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       return undefined;
     }
     const [pathname, query] = req.url.split('?', 2);
+    if (req.method === 'GET' && pathname === '/projects') {
+      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(projectsPage(projects()));
+    }
     if (req.method === 'GET' && pathname === '/runs') {
       const filter = parseRunFilter(new URLSearchParams(query));
       if (!filter) return send(400, '잘못된 날짜입니다.');
@@ -368,7 +430,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
         .end(detailPage(runView(run), db.getLogs(run.id), db.getProjectSettings(run.project)?.alias));
     }
-    if (!isPost || !['/run', '/projects'].includes(req.url)) return send(404, '없는 경로입니다.');
+    if (!isPost || !['/run', '/projects', '/groups', '/groups/delete'].includes(req.url)) return send(404, '없는 경로입니다.');
 
     let body = '';
     let tooLarge = false;
@@ -380,17 +442,30 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       if (tooLarge) return send(413, '요청이 너무 큽니다.');
       let input;
       try { input = JSON.parse(body); } catch { return send(400, '잘못된 요청입니다.'); }
-      if (req.url === '/projects') {
-        const settings = parseProjectSettings(input, listProjects(root));
-        if (!settings) return send(400, '별칭과 그룹을 확인해 주세요.');
-        try {
-          db.saveProjectSettings(settings);
-        } catch (err) {
-          return send(500, err.message);
-        }
-        const view = projects();
+      const sendGroups = () => {
+        const { groups } = projects();
         return res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-          .end(JSON.stringify({ options: projectOptions(view), groups: view.groups }));
+          .end(JSON.stringify({ groups, options: groupOptions(groups), items: groupItems(groups) }));
+      };
+      try {
+        if (req.url === '/projects') {
+          const settings = parseProjectSettings(input, listProjects(root), db.listGroups());
+          if (!settings) return send(400, '별칭과 그룹을 확인해 주세요.');
+          db.saveProjectSettings(settings);
+          return send(200, '저장했습니다.');
+        }
+        if (req.url === '/groups') {
+          const name = parseGroupName(input?.name);
+          if (!name) return send(400, `그룹 이름을 확인해 주세요. 50자 이내이고 ${UNGROUPED}은 쓸 수 없습니다.`);
+          if (!db.addGroup(name)) return send(409, '이미 있는 그룹입니다.');
+          return sendGroups();
+        }
+        if (req.url === '/groups/delete') {
+          if (typeof input?.name !== 'string' || !db.deleteGroup(input.name)) return send(404, '없는 그룹입니다.');
+          return sendGroups();
+        }
+      } catch (err) {
+        return send(500, err.message);
       }
       if (!isValidProject(input?.project, root)) return send(400, '없는 프로젝트입니다.');
       const url = parseNotionUrl(input.url);
