@@ -194,6 +194,17 @@ const gnb = (current) => {
 };
 
 // 업무 내역 (main page): searchable list of past runs, refreshed when a run starts or ends.
+// A browser opens at most 6 connections to one host, and each open tab holds one /events stream, so a 7th tab
+// would hang. Only the visible tab keeps the stream; a tab coming back reconnects, and onopen reloads its view.
+const liveEvents = `function liveEvents(setup) {
+  let es = null;
+  const sync = () => {
+    if (document.hidden) { if (es) es.close(); es = null; } else if (!es) { es = new EventSource('/events'); setup(es); }
+  };
+  document.addEventListener('visibilitychange', sync);
+  sync();
+}`;
+
 const historyPage = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">${favicon}<title>업무 내역 - 노션 개발 러너</title>
 ${style}
@@ -288,9 +299,11 @@ pageSizeSelect.onchange = () => { currentPage = 1; loadRuns(); };
 prev.onclick = () => { currentPage -= 1; loadRuns(); };
 next.onclick = () => { currentPage += 1; loadRuns(); };
 // The list only follows run changes; log lines are for the 업무 실행 page.
-const es = new EventSource('/events');
-es.onopen = loadRuns;
-es.addEventListener('runs', loadRuns);
+${liveEvents}
+liveEvents((es) => {
+  es.onopen = loadRuns;
+  es.addEventListener('runs', loadRuns);
+});
 </script></html>`;
 
 // 업무 실행: start a run and follow its time bars and live log.
@@ -337,22 +350,24 @@ async function loadTimeline() {
   // Scoped to the list: the legend also has an active swatch.
   if (timelineEl.querySelector('.timeline .bar.active')) scheduleTimeline(2000);
 }
-const es = new EventSource('/events');
 // Same grouping as the detail page, so the whole log is redrawn as lines arrive.
 ${groupLog.toString()}
 let lines = [];
 const showLog = () => { log.textContent = lines.length ? groupLog(lines).join('\\n') + '\\n' : ''; };
-es.onopen = () => { lines = []; showLog(); loadTimeline(); };
-es.addEventListener('runs', () => scheduleTimeline(100));
 const status = document.getElementById('status');
-es.onmessage = (e) => {
-  scheduleTimeline(300);
-  const text = JSON.parse(e.data);
-  if (text.startsWith('시작: ')) lines = [];
-  lines.push(text);
-  showLog();
-  log.scrollTop = log.scrollHeight;
-};
+${liveEvents}
+liveEvents((es) => {
+  es.onopen = () => { lines = []; showLog(); loadTimeline(); };
+  es.addEventListener('runs', () => scheduleTimeline(100));
+  es.onmessage = (e) => {
+    scheduleTimeline(300);
+    const text = JSON.parse(e.data);
+    if (text.startsWith('시작: ')) lines = [];
+    lines.push(text);
+    showLog();
+    log.scrollTop = log.scrollHeight;
+  };
+});
 const runForm = document.getElementById('f');
 // The last chosen AI stays selected next time.
 try { const agent = localStorage.getItem('agent'); if ([...runForm.elements.agent.options].some((o) => o.value === agent)) runForm.elements.agent.value = agent; } catch {}
