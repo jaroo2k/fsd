@@ -78,14 +78,18 @@ function parseNotionUrl(value) {
 const MAX_TASK_LENGTH = 10000;
 
 // A run needs a notion link, a task description, or both. Returns { url, task } or { error }.
+const AGENTS = { claude: 'Claude', codex: 'Codex' };
+
 function parseRunRequest(input) {
+  const agent = input?.agent ?? 'claude';
+  if (!Object.hasOwn(AGENTS, agent)) return { error: '실행 AI는 Claude나 Codex만 고를 수 있습니다.' };
   const rawUrl = typeof input?.url === 'string' ? input.url.trim() : '';
   const task = typeof input?.task === 'string' ? input.task.trim() : '';
   if (!rawUrl && !task) return { error: '노션 링크나 업무 내용을 입력해 주세요.' };
   const url = rawUrl ? parseNotionUrl(rawUrl) : '';
   if (url === null) return { error: '노션 링크가 아닙니다.' };
   if (task.length > MAX_TASK_LENGTH) return { error: `업무 내용은 ${MAX_TASK_LENGTH}자 이내로 입력해 주세요.` };
-  return { url, task };
+  return { url, task, agent };
 }
 
 // One pass, so a task that happens to contain "{{BRANCH}}" is not filled in again.
@@ -226,7 +230,47 @@ const STATUS_LABELS = { queued: '대기 중', running: '실행 중', success: '�
 const runView = (run) => ({
   ...run,
   statusLabel: STATUS_LABELS[run.status] || run.status,
+  agentLabel: AGENTS[run.agent] || AGENTS.claude,
 });
+
+// Codex item types shown as the Claude tool with the same meaning, so logs and bars read the same for both.
+const CODEX_TOOLS = { command_execution: 'Bash', file_change: 'Edit', web_search: 'WebSearch', todo_list: 'TodoWrite' };
+const codexTool = (item) => (item.type === 'mcp_tool_call' ? `mcp__${item.server}__${item.tool}` : CODEX_TOOLS[item.type]);
+
+// Turns `codex exec --json` events into Claude stream-json events. Tool input is dropped on purpose: a Codex
+// command has no short description, and the command itself could hold a secret.
+function codexTranslator() {
+  const started = new Set();
+  let lastMessage = '';
+  const use = (item) => {
+    started.add(item.id);
+    return { type: 'assistant', message: { content: [{ type: 'tool_use', id: item.id, name: codexTool(item), input: {} }] } };
+  };
+  return (e) => {
+    const item = e.item && typeof e.item === 'object' ? e.item : null;
+    if (e.type === 'thread.started') return [{ type: 'system', subtype: 'init' }];
+    if (e.type === 'item.started' && item && codexTool(item)) return [use(item)];
+    if (e.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') {
+      lastMessage = item.text;
+      return [{ type: 'assistant', message: { content: [{ type: 'text', text: item.text }] } }];
+    }
+    if (e.type === 'item.completed' && item && codexTool(item)) {
+      // A file change can arrive only as completed; it still gets a (short) bar.
+      const events = started.has(item.id) ? [] : [use(item)];
+      return [...events, { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: item.id }] } }];
+    }
+    if (e.type === 'turn.completed') return [{ type: 'result', result: lastMessage, is_error: false }];
+    if (e.type === 'turn.failed') {
+      const message = String(e.error?.message || '알 수 없는 오류');
+      return [{ type: 'assistant', message: { content: [{ type: 'text', text: `오류: ${message}` }] } },
+        { type: 'result', result: message, is_error: true }];
+    }
+    if (e.type === 'error' && typeof e.message === 'string') {
+      return [{ type: 'assistant', message: { content: [{ type: 'text', text: `오류: ${e.message}` }] } }];
+    }
+    return [];
+  };
+}
 
 function formatDuration(ms) {
   const seconds = Math.max(0, ms) / 1000;
@@ -297,5 +341,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel, groupLog, maskSecrets,
+  AGENTS, codexTranslator, listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel, groupLog, maskSecrets,
 };

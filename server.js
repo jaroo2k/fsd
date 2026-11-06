@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog, maskSecrets,
+  AGENTS, codexTranslator, listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog, maskSecrets,
 } = require('./lib');
 const { openDb } = require('./db');
 
@@ -252,7 +252,7 @@ async function loadRuns() {
       badge.className = 'badge ' + r.status;
       badge.textContent = r.statusLabel;
       const row = document.createElement('tr');
-      for (const content of [link, r.alias || r.project, badge, new Date(r.started_at).toLocaleString()]) {
+      for (const content of [link, (r.alias || r.project) + ' · ' + r.agentLabel, badge, new Date(r.started_at).toLocaleString()]) {
         row.insertCell().append(content);
       }
       return row;
@@ -291,6 +291,7 @@ ${gnb('execute')}
 <div class="workspace">
 <section class="card request"><h2>새 업무 설정</h2>
 <form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
+<label>실행 AI<select name="agent">${Object.entries(AGENTS).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label>
 <label class="url">노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..."></label>
 <label class="task">업무 내용 추가<textarea name="task" rows="4" maxlength="${MAX_TASK_LENGTH}" aria-describedby="task-hint" placeholder="예: 주문 목록에 검색 기능 추가"></textarea>
 <span class="hint" id="task-hint">노션 링크가 없으면 이 내용으로 개발합니다. 둘 다 입력하면 노션 문서의 지시에 더해 반영합니다.</span></label>
@@ -341,6 +342,9 @@ es.onmessage = (e) => {
   log.scrollTop = log.scrollHeight;
 };
 const runForm = document.getElementById('f');
+// The last chosen AI stays selected next time.
+try { const agent = localStorage.getItem('agent'); if ([...runForm.elements.agent.options].some((o) => o.value === agent)) runForm.elements.agent.value = agent; } catch {}
+runForm.elements.agent.addEventListener('change', () => { try { localStorage.setItem('agent', runForm.elements.agent.value); } catch {} });
 runForm.elements.task.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runForm.requestSubmit(); }
 });
@@ -535,6 +539,7 @@ ${gnb('history')}
 ${timeline ? timelineSection(run, timeline) : ''}
 <section class="card"><table class="meta">
 <tr><th>프로젝트</th><td>${escapeHtml(alias ? `${alias} (${run.project})` : run.project)}</td></tr>
+<tr><th>실행 AI</th><td>${escapeHtml(run.agentLabel)}</td></tr>
 <tr><th>브랜치</th><td>${escapeHtml(run.branch || '-')}</td></tr>
 <tr><th>노션 문서</th><td>${run.url ? `<a href="${escapeHtml(run.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.url)}</a>` : '-'}</td></tr>
 ${run.task ? `<tr><th>업무 내용</th><td><div class="task-text">${escapeHtml(run.task)}</div></td></tr>` : ''}
@@ -547,6 +552,15 @@ ${run.task ? `<tr><th>업무 내용</th><td><div class="task-text">${escapeHtml(
 for (const t of document.querySelectorAll('time')) t.textContent = new Date(t.dateTime).toLocaleString();
 </script></html>`;
 
+// The notion token reaches the MCP server through the environment (env_vars), never the command line.
+function runCodex(prompt, cwd) {
+  return spawn('codex', ['exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check',
+    '-c', 'mcp_servers.notion.command="notion-mcp-server"', '-c', 'mcp_servers.notion.env_vars=["NOTION_TOKEN"]', prompt],
+  { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+const runAgent = (prompt, cwd, agent) => (agent === 'codex' ? runCodex : runClaude)(prompt, cwd);
+
 function runClaude(prompt, cwd) {
   return spawn('claude', ['-p', prompt, '--output-format', 'stream-json', '--verbose',
     '--permission-mode', 'bypassPermissions',
@@ -554,7 +568,7 @@ function runClaude(prompt, cwd) {
   { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
+function createApp({ root, start = runAgent, db = openDb(':memory:') }) {
   let current = null;
   // The home page keeps showing the last run's bars after it ends.
   let lastRunId = null;
@@ -615,7 +629,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     } catch { /* launch already recorded the failure and moved on */ }
   }
 
-  function launch(runId, { project, url, task }, branch) {
+  function launch(runId, { project, url, task, agent = 'claude' }, branch) {
     const cwd = path.join(root, project);
     const say = (raw) => {
       const text = clean(raw);
@@ -625,7 +639,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     current = { project, url, task };
     lastRunId = runId;
     log = [];
-    say(`시작: ${project} (${branch})`);
+    say(`시작: ${project} (${branch}) · ${AGENTS[agent]}`);
     notifyRuns();
 
     let result = null;
@@ -645,12 +659,13 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       const prompt = buildPrompt({
         notionTemplate: url ? template('prompt.md') : '', taskTemplate: url ? '' : template('prompt-task.md'), url, task, branch,
       });
-      child = start(prompt, cwd);
+      child = start(prompt, cwd, agent);
     } catch (err) {
       finish('failed', `실패: ${err.message}`);
       throw err;
     }
     let buffered = '';
+    const translate = agent === 'codex' ? codexTranslator() : (e) => [e];
     const steps = new Map();
     // One bar per tool call. The bar lasts until the next call starts; the result only marks a call as done.
     const trackSteps = (e) => {
@@ -666,17 +681,18 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       const lines = (buffered + chunk).split('\n');
       buffered = lines.pop();
       for (const line of lines.filter(Boolean)) {
-        try {
-          const e = JSON.parse(line);
+        let events;
+        try { events = translate(JSON.parse(line)); } catch { say(line); continue; }
+        for (const e of events) {
           trackSteps(e);
           if (e.type === 'result') {
             result = e;
             const summary = extractSummary(e.result);
             if (summary) record(() => db.setSummary(runId, clean(summary)));
           }
-        } catch { /* plain text is shown as is */ }
-        const text = formatEvent(line);
-        if (text) say(text);
+          const text = formatEvent(JSON.stringify(e));
+          if (text) say(text);
+        }
       }
     });
     child.stderr.setEncoding('utf8').on('data', (t) => say(t.trimEnd()));
@@ -777,10 +793,10 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       if (!isValidProject(input?.project, root)) return send(400, '없는 프로젝트입니다.');
       const request = parseRunRequest(input);
       if (request.error) return send(400, request.error);
-      const { url, task } = request;
-      const job = { project: input.project, url, task };
+      const { url, task, agent } = request;
+      const job = { project: input.project, url, task, agent };
       // Only a notion link needs the token; a task-only run never touches notion.
-      if (url && start === runClaude && !process.env.NOTION_TOKEN) return send(400, 'NOTION_TOKEN이 설정되지 않았습니다.');
+      if (url && start === runAgent && !process.env.NOTION_TOKEN) return send(400, 'NOTION_TOKEN이 설정되지 않았습니다.');
       // Also what stops a double click from running the same request twice.
       const same = (other) => other.project === job.project && other.url === url && other.task === task;
       if ((current && same(current)) || queue.some(same)) return send(409, '같은 작업이 이미 실행 중이거나 대기 중입니다.');

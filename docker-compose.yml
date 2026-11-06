@@ -14,6 +14,7 @@ services:
       - D:/fsd:/workspace
       - runner-data:/data
       - ${USERPROFILE}/.claude/.credentials.json:/home/node/.claude/.credentials.json
+      - ${USERPROFILE}/.codex/auth.json:/home/node/.codex/auth.json
       - ${USERPROFILE}/.gitconfig:/home/node/.gitconfig:ro
 
   # Separate daemon so test runs cannot touch the host's containers. No ports published:

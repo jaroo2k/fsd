@@ -11,15 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list \
   && apt-get update && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
   && pip install pytest \
-  && npm install -g @anthropic-ai/claude-code @notionhq/notion-mcp-server playwright \
+  && npm install -g @anthropic-ai/claude-code @openai/codex @notionhq/notion-mcp-server playwright \
   && playwright install --with-deps chromium \
   && rm -rf /var/lib/apt/lists/* \
   # Bind-mounted Windows folders show a different owner, which git would otherwise refuse.
   && git config --system --add safe.directory '*'
 WORKDIR /app
 COPY server.js lib.js db.js prompt.md prompt-task.md mcp.json ./
-# An empty named volume inherits this owner, so the node user can write the database.
-RUN mkdir -p /data && chown node:node /data
+# An empty named volume inherits this owner, so the node user can write the database. Codex writes its sessions
+# next to the mounted auth.json, so its folder must belong to node too.
+RUN mkdir -p /data /home/node/.codex && chown node:node /data /home/node/.codex
 # bypassPermissions refuses to run as root.
 USER node
 CMD ["node", "server.js"]
