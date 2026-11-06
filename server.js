@@ -25,7 +25,7 @@ const style = `<style>
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;${darkVars}}}
 :root[data-theme=dark]{color-scheme:dark;${darkVars}}:root[data-theme=light]{color-scheme:light}
 *{box-sizing:border-box}
-html{font-size:14px}
+html{font-size:14px;scrollbar-gutter:stable}
 body{margin:0;background:var(--bg);color:var(--text);word-break:keep-all;
 font:1rem/1.5 system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",sans-serif}
 main{max-width:1240px;margin:0 auto;padding:2.25rem 1.5rem 4rem}
