@@ -196,7 +196,6 @@ const gnb = (current) => {
 </script>`;
 };
 
-// 업무 내역 (main page): searchable list of past runs, refreshed when a run starts or ends.
 // A browser opens at most 6 connections to one host, and each open tab holds one /events stream, so a 7th tab
 // would hang. Only the visible tab keeps the stream; a tab coming back reconnects, and onopen reloads its view.
 const liveEvents = `function liveEvents(setup) {
@@ -208,6 +207,7 @@ const liveEvents = `function liveEvents(setup) {
   sync();
 }`;
 
+// 업무 내역 (main page): searchable list of past runs, refreshed when a run starts or ends.
 const historyPage = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">${favicon}<title>업무 내역 - 노션 개발 러너</title>
 ${style}
