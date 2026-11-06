@@ -141,6 +141,31 @@ function toolLabel(name) {
 
 const SYSTEM_LABELS = { init: '작업 환경을 준비했습니다.', compact_boundary: '대화가 길어져 앞부분을 요약했습니다.' };
 
+const MASK = '***';
+const SECRET_KEY = 'password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|client[_-]?secret|credential';
+const VALUE = `("[^"\\n]*"|'[^'\\n]*'|[^\\s"',;&]+)`;
+const keepQuotes = (match, name, value) => name + (/^["']/.test(value) ? value[0] + MASK + value[0] : MASK);
+// Pattern based, so it can miss a secret with no telltale name or shape, and can also hide a harmless value.
+const SECRET_PATTERNS = [
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, `-----BEGIN PRIVATE KEY----- ${MASK}`],
+  [/\b(?:ntn_|secret_|sk-|sk_live_|sk_test_|rk_live_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza)[A-Za-z0-9_-]{10,}/g, MASK],
+  [/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+/g, MASK],
+  [/(\bauthorization\s*[:=]\s*["']?(?:bearer|basic|token)?\s*)[^\s"',;]+/gi, `$1${MASK}`],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, `$1${MASK}@`],
+  // A quoted value is hidden up to its closing quote, so a value with spaces does not leak its tail.
+  [new RegExp(`(--(?:${SECRET_KEY})(?:=|\\s+))${VALUE}`, 'gi'), keepQuotes],
+  [new RegExp(`(\\b[\\w.-]*(?:${SECRET_KEY})s?["']?\\s*[:=]\\s*)${VALUE}`, 'gi'), keepQuotes],
+];
+
+// known: exact secret values this server holds, such as its own notion token.
+function maskSecrets(text, known = []) {
+  if (typeof text !== 'string') return text;
+  let out = text;
+  for (const value of known) if (typeof value === 'string' && value.length >= 8) out = out.split(value).join(MASK);
+  for (const [pattern, replacement] of SECRET_PATTERNS) out = out.replace(pattern, replacement);
+  return out;
+}
+
 const DETAIL_MAX = 80;
 
 // Only what a command was run for: Claude's own description when it gave one, otherwise the command's first line.
@@ -264,5 +289,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel, groupLog,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel, groupLog, maskSecrets,
 };

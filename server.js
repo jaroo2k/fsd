@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog, maskSecrets,
 } = require('./lib');
 const { openDb } = require('./db');
 
@@ -423,7 +423,10 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
   const queue = [];
   let log = [];
   const clients = new Set();
-  const emit = (text) => {
+  // Every log line goes through this before it is shown or saved. Read per call, so a token set later counts too.
+  const clean = (text) => maskSecrets(text, [process.env.NOTION_TOKEN]);
+  const emit = (raw) => {
+    const text = clean(raw);
     log.push(text);
     for (const c of clients) c.write(`data: ${JSON.stringify(text)}\n\n`);
   };
@@ -463,7 +466,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     } catch (err) {
       const message = `실패: ${err.message}`;
       emit(`${job.project} ${message}`);
-      record(() => db.appendLog(job.runId, message));
+      record(() => db.appendLog(job.runId, clean(message)));
       record(() => db.finishRun(job.runId, 'failed'));
       notifyRuns();
       startNext();
@@ -476,7 +479,8 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
 
   function launch(runId, { project, url, task }, branch) {
     const cwd = path.join(root, project);
-    const say = (text) => {
+    const say = (raw) => {
+      const text = clean(raw);
       record(() => db.appendLog(runId, text));
       emit(text);
     };
@@ -530,7 +534,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
           if (e.type === 'result') {
             result = e;
             const summary = extractSummary(e.result);
-            if (summary) record(() => db.setSummary(runId, summary));
+            if (summary) record(() => db.setSummary(runId, clean(summary)));
           }
         } catch { /* plain text is shown as is */ }
         const text = formatEvent(line);
@@ -593,7 +597,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       if (!run) return send(404, '없는 작업입니다.');
       const timeline = new URLSearchParams(query).get('view') === 'time' ? timelineView(run, db.getSteps(run.id)) : null;
       return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-        .end(detailPage(runView(run), db.getLogs(run.id), db.getProjectSettings(run.project)?.alias, timeline));
+        .end(detailPage(runView(run), db.getLogs(run.id).map(clean), db.getProjectSettings(run.project)?.alias, timeline));
     }
     if (!isPost || !['/run', '/projects', '/groups', '/groups/delete'].includes(req.url)) return send(404, '없는 경로입니다.');
 
