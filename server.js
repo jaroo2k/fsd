@@ -114,7 +114,6 @@ pre:empty::before{content:"표시할 로그가 없습니다.";color:var(--log-em
 .dur{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .muted{margin:.75rem 0 0;color:var(--muted);font-size:.925rem}
 #timeline:empty{display:none}#timeline .timeline{max-height:40vh}#timeline h2 a{font-weight:400}
-.board-page{max-width:1440px}
 .board-top{display:flex;align-items:flex-end;justify-content:space-between;gap:1.5rem;flex-wrap:wrap}
 .board-tools{display:flex;gap:.5rem;margin-bottom:1.75rem}.board-tools input{width:18rem;margin:0}
 a.button{display:inline-flex;align-items:center;height:2.9rem;padding:0 1.25rem;border-radius:6px;font-weight:700;white-space:nowrap}
@@ -394,7 +393,7 @@ const projectsPage = ({ rows, groups }, stats, isGit) => {
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>프로젝트 관리 - 노션 개발 러너</title>
 ${style}
 ${gnb('projects')}
-<main class="board-page">
+<main>
 <div class="board-top"><header class="title"><h1>프로젝트 관리</h1><p>카드를 다른 그룹으로 끌어 옮기고, 편집을 눌러 별칭과 그룹을 바꿉니다.</p></header>
 <div class="board-tools"><input id="board-search" type="search" placeholder="폴더명이나 별칭으로 찾기" aria-label="프로젝트 찾기"><a class="button secondary" href="/projects">폴더 다시 읽기</a></div></div>
 <p id="board-note" class="note" role="status"></p>
