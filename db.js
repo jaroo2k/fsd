@@ -81,6 +81,9 @@ function openDb(file) {
   const upsertProject = db.prepare(`INSERT INTO projects (name, alias, group_name) VALUES (?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET alias = excluded.alias, group_name = excluded.group_name`);
   const selectProjects = db.prepare('SELECT * FROM projects');
+  const selectProjectStats = db.prepare(`SELECT project, COUNT(*) AS total,
+    (SELECT status FROM runs AS last WHERE last.project = runs.project ORDER BY last.id DESC LIMIT 1) AS last
+    FROM runs GROUP BY project`);
   const selectProject = db.prepare('SELECT * FROM projects WHERE name = ?');
   const selectGroups = db.prepare('SELECT name FROM project_groups');
   const insertGroup = db.prepare('INSERT OR IGNORE INTO project_groups (name) VALUES (?)');
@@ -122,6 +125,8 @@ function openDb(file) {
     finishStep: (stepId) => { updateStep.run(now(), stepId); },
     getSteps: (runId) => selectSteps.all(runId),
     listProjectSettings: () => selectProjects.all(),
+    // Per project: how many runs it has and the status of its latest one.
+    projectStats: () => new Map(selectProjectStats.all().map((row) => [row.project, { total: row.total, last: row.last }])),
     getProjectSettings: (name) => selectProject.get(name),
     // All or nothing, so a failed save never leaves the form half applied.
     saveProjectSettings: (settings) => transaction(() => {

@@ -108,6 +108,32 @@ pre:empty::before{content:"표시할 로그가 없습니다.";color:var(--log-em
 .dur{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .muted{margin:.75rem 0 0;color:var(--muted);font-size:.925rem}
 #timeline:empty{display:none}#timeline .timeline{max-height:40vh}#timeline h2 a{font-weight:400}
+.board-page{max-width:1440px}
+.board-top{display:flex;align-items:flex-end;justify-content:space-between;gap:1.5rem;flex-wrap:wrap}
+.board-tools{display:flex;gap:.5rem;margin-bottom:1.75rem}.board-tools input{width:18rem;margin:0}
+a.button{display:inline-flex;align-items:center;height:2.9rem;padding:0 1.25rem;border-radius:6px;font-weight:700;white-space:nowrap}
+a.button.secondary{color:var(--accent);background:var(--surface);border:1px solid var(--field-border)}a.button:hover{text-decoration:none;background:var(--accent-soft)}
+#board-note{margin:0 0 1rem}#board-note:empty{display:none}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(17rem,1fr));gap:1.1rem;align-items:start}
+.col{background:var(--accent-soft);border:2px solid transparent;border-radius:14px;padding:.9rem;transition:border-color .15s}
+.col.over{border-color:var(--accent);border-style:dashed}
+.colhead{display:flex;align-items:center;gap:.5rem;padding:.2rem .35rem .8rem}.colhead h2{margin:0;font-size:.95rem}
+.colmark{width:4px;height:1rem;border-radius:2px}.count{font-size:.75rem;color:var(--muted);background:var(--surface);border-radius:1rem;padding:0 .5rem}
+button.link{height:auto;padding:0;background:none;color:var(--accent);font-size:.75rem;font-weight:700}button.link:hover{background:none;text-decoration:underline}
+.colhead .del{margin-left:auto;color:var(--muted)}
+.pcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.9rem;margin-bottom:.65rem;box-shadow:var(--shadow);cursor:grab}
+.pcard[hidden]{display:none}.pcard.dragging{opacity:.45}.pcard.editing{border:2px solid var(--accent);cursor:default}
+.pc-head{display:flex;align-items:center;gap:.5rem}.pc-head .alias{font-size:1rem;overflow-wrap:anywhere}.pc-head .alias.empty{color:var(--muted)}.pc-head .edit{margin-left:auto}
+.pcard .folder{margin-top:.1rem;color:var(--muted);font:.8rem ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+.pcard .meta{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.75rem;font-size:.72rem;color:var(--muted)}.pcard .meta span{background:var(--bg);border-radius:4px;padding:.1rem .45rem}
+.pcard .meta .s-success{background:var(--success-bg);color:var(--success)}.pcard .meta .s-failed{background:var(--failed-bg);color:var(--failed)}
+.pcard .meta .s-running,.pcard .meta .s-queued{background:var(--running-bg);color:var(--running)}
+.editor label{margin-top:.75rem;font-size:.75rem;color:var(--muted)}.editor input,.editor select{height:2.4rem;margin-top:.3rem}
+.editor .row{display:flex;gap:.4rem;margin-top:.8rem}.editor .row button{height:2.2rem;padding:0 .9rem;font-size:.8rem}
+.drop{display:none;margin:0;padding:.85rem;border:2px dashed var(--field-border);border-radius:12px;text-align:center;color:var(--muted);font-size:.75rem}
+.cards:empty+.drop,.col.over .drop{display:block}
+.newcol{border:2px dashed var(--field-border);border-radius:14px;padding:1.1rem}.newcol label{color:var(--accent)}.newcol button{width:100%;margin-top:.6rem}
+@media (max-width:640px){.board-tools{width:100%}.board-tools input{width:auto;flex:1}}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 @media (max-width:900px){.workspace{grid-template-columns:minmax(0,1fr)}.workspace>*,.workspace>.request{grid-column:1;grid-row:auto}}
 @media (max-width:640px){main{padding:1.5rem 1rem 3rem}.card{padding:1.25rem}h1{font-size:1.6rem}#search,#group-form{grid-template-columns:minmax(0,1fr)}button{width:100%}.submit{flex-direction:column-reverse;align-items:stretch}
@@ -301,87 +327,152 @@ runForm.onsubmit = async (e) => {
 };
 </script></html>`;
 
-const projectsPage = ({ rows, groups }) => `<!doctype html><html lang="ko"><meta charset="utf-8">
+// 프로젝트 관리: one column per group, one card per project folder. Cards are saved one at a time
+// through the existing /projects API, which accepts any subset of folders.
+const COLUMN_COLORS = ['#43a876', '#edbd38', '#9b7be0', '#345fc7', '#e07b7b', '#3aa6b9'];
+
+const projectCard = (row, groups, stat, isGit) => {
+  const last = stat?.last ? runView({ status: stat.last }) : null;
+  const meta = [
+    last && `<span class="s-${escapeHtml(last.status)}">최근 ${escapeHtml(last.statusLabel)}</span>`,
+    `<span>${stat?.total ? `업무 ${stat.total}건` : '기록 없음'}</span>`,
+    isGit ? '' : '<span>git 아님</span>',
+  ].filter(Boolean).join('');
+  return `<article class="pcard" draggable="true" data-name="${escapeHtml(row.name)}" data-group="${escapeHtml(row.group)}" data-search="${escapeHtml(`${row.name} ${row.alias}`.toLowerCase())}">
+<div class="pc-head"><strong class="alias${row.alias ? '' : ' empty'}">${escapeHtml(row.alias || '별칭 없음')}</strong><button type="button" class="link edit" aria-label="${escapeHtml(row.name)} 편집">편집</button></div>
+<div class="folder">${escapeHtml(row.name)}</div>
+<div class="meta">${meta}</div>
+<form class="editor" hidden><label>별칭<input name="alias" maxlength="50" value="${escapeHtml(row.alias)}"></label>
+<label>그룹<select name="group">${groupOptions(groups, row.group)}</select></label>
+<div class="row"><button>저장</button><button type="button" class="secondary cancel">취소</button></div></form>
+</article>`;
+};
+
+const projectsPage = ({ rows, groups }, stats, isGit) => {
+  const column = (group, label, color) => {
+    const cards = rows.filter((r) => r.group === group);
+    return `<section class="col" data-group="${escapeHtml(group)}" aria-label="${escapeHtml(label)} 그룹">
+<header class="colhead"><i class="colmark" style="background:${color}"></i><h2>${escapeHtml(label)}</h2><span class="count">${cards.length}</span>${group ? `<button type="button" class="link del" data-group="${escapeHtml(group)}" aria-label="${escapeHtml(label)} 그룹 삭제">삭제</button>` : ''}</header>
+<div class="cards">${cards.map((r) => projectCard(r, groups, stats.get(r.name), isGit(r.name))).join('')}</div>
+<p class="drop">여기로 끌어 놓기</p></section>`;
+  };
+  return `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>프로젝트 관리 - 노션 개발 러너</title>
 ${style}
 ${gnb('projects')}
-<main>
-<header class="title"><h1>프로젝트 관리</h1><p>프로젝트 폴더에 별칭과 그룹을 지정해 업무 실행과 내역에서 쉽게 구분합니다.</p></header>
-<section class="card"><h2>그룹</h2>
-<form id="group-form"><label>새 그룹<input name="name" maxlength="50" required></label><button>추가</button></form>
-<p id="groups-note" class="note" role="status"></p>
-<ul id="group-list">${groupItems(groups)}</ul></section>
-<section class="card"><h2>프로젝트</h2>
-<form id="projects"><table class="projects"><thead><tr><th>폴더</th><th>별칭</th><th>그룹</th></tr></thead><tbody>
-${rows.map((r) => `<tr data-name="${escapeHtml(r.name)}"><td>${escapeHtml(r.name)}</td>
-<td><input name="alias" maxlength="50" placeholder="별칭" aria-label="${escapeHtml(r.name)} 별칭" value="${escapeHtml(r.alias)}"></td>
-<td><select name="group" aria-label="${escapeHtml(r.name)} 그룹">${groupOptions(groups, r.group)}</select></td></tr>`).join('')}
-</tbody></table>
-<div class="project-actions"><button>저장</button><p id="projects-note" class="note" role="status"></p></div></form></section>
+<main class="board-page">
+<div class="board-top"><header class="title"><h1>프로젝트 관리</h1><p>카드를 다른 그룹으로 끌어 옮기고, 편집을 눌러 별칭과 그룹을 바꿉니다.</p></header>
+<div class="board-tools"><input id="board-search" type="search" placeholder="폴더명이나 별칭으로 찾기" aria-label="프로젝트 찾기"><a class="button secondary" href="/projects">폴더 다시 읽기</a></div></div>
+<p id="board-note" class="note" role="status"></p>
+<div class="board">
+${groups.map((g, i) => column(g, g, COLUMN_COLORS[i % COLUMN_COLORS.length])).join('')}
+${column('', UNGROUPED, 'var(--bar-stopped)')}
+<form id="group-form" class="newcol"><label>+ 새 그룹<input name="name" maxlength="50" required placeholder="그룹 이름 (50자 이내)"></label><button>그룹 추가</button></form>
+</div>
+<p class="muted">그룹을 삭제하면 그 그룹의 프로젝트는 ${UNGROUPED}로 옮겨집니다. 업무 실행에는 계속 실제 폴더명을 씁니다.</p>
 </main>
 <script>
-const groupForm = document.getElementById('group-form');
-const groupList = document.getElementById('group-list');
-const groupsNote = document.getElementById('groups-note');
-const projectForm = document.getElementById('projects');
-const projectNote = document.getElementById('projects-note');
-function note(el, kind, text) {
-  el.className = 'note ' + kind;
-  el.textContent = text;
-}
+const note = document.getElementById('board-note');
+const say = (kind, text) => { note.className = 'note ' + kind; note.textContent = text; };
 async function post(url, body) {
   const res = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
   if (!res.ok) throw new Error(await res.text());
   return res;
 }
-// Choices not saved yet stay selected, except the ones pointing at a group that no longer exists.
-function showGroups({ groups, options, items }) {
-  groupList.innerHTML = items;
-  for (const select of projectForm.querySelectorAll('select[name=group]')) {
-    const selected = select.value;
-    select.innerHTML = options;
-    select.value = groups.includes(selected) ? selected : '';
+const columnOf = (group) => [...document.querySelectorAll('.col')].find((c) => c.dataset.group === group);
+const recount = () => { for (const c of document.querySelectorAll('.col')) c.querySelector('.count').textContent = c.querySelectorAll('.pcard').length; };
+// Saves one card, then moves it to its group's column; nothing on the page changes if the save fails.
+async function saveCard(card, alias, group) {
+  try {
+    await post('/projects', [{ name: card.dataset.name, alias, group }]);
+  } catch (err) {
+    say('err', '저장하지 못했습니다. ' + err.message);
+    return false;
   }
+  const title = card.querySelector('.alias');
+  title.textContent = alias.trim() || '별칭 없음';
+  title.classList.toggle('empty', !alias.trim());
+  card.querySelector('[name=alias]').defaultValue = alias.trim();
+  // Defaults too, so a later 취소 (form reset) returns to the saved values.
+  for (const option of card.querySelector('[name=group]').options) option.defaultSelected = option.value === group;
+  card.dataset.group = group;
+  card.dataset.search = (card.dataset.name + ' ' + alias.trim()).toLowerCase();
+  columnOf(group).querySelector('.cards').append(card);
+  recount();
+  say('ok', '"' + card.dataset.name + '"을(를) 저장했습니다.');
+  return true;
 }
-groupForm.onsubmit = async (e) => {
+const closeEditor = (card) => {
+  const form = card.querySelector('.editor');
+  form.reset();
+  form.hidden = true;
+  card.classList.remove('editing');
+  card.draggable = true;
+};
+document.querySelector('.board').addEventListener('click', async (e) => {
+  const card = e.target.closest('.pcard');
+  if (e.target.closest('.edit')) {
+    for (const open of document.querySelectorAll('.pcard.editing')) if (open !== card) closeEditor(open);
+    card.classList.add('editing');
+    card.draggable = false;
+    card.querySelector('.editor').hidden = false;
+    card.querySelector('[name=alias]').focus();
+  } else if (e.target.closest('.cancel')) {
+    closeEditor(card);
+  } else if (e.target.closest('.del')) {
+    const name = e.target.closest('.del').dataset.group;
+    if (!confirm('"' + name + '" 그룹을 삭제할까요? 이 그룹의 프로젝트는 ${UNGROUPED}로 옮겨집니다.')) return;
+    try {
+      await post('/groups/delete', { name });
+      location.reload();
+    } catch (err) {
+      say('err', '삭제하지 못했습니다. ' + err.message);
+    }
+  }
+});
+document.querySelector('.board').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const name = groupForm.elements.name.value;
-  try {
-    showGroups(await (await post('/groups', { name })).json());
-    groupForm.reset();
-    note(groupsNote, 'ok', '추가했습니다.');
-  } catch (err) {
-    note(groupsNote, 'err', '추가하지 못했습니다. ' + err.message);
+  const form = e.target;
+  if (form.id === 'group-form') {
+    try {
+      await post('/groups', { name: form.elements.name.value });
+      location.reload();
+    } catch (err) {
+      say('err', '그룹을 추가하지 못했습니다. ' + err.message);
+    }
+    return;
   }
-};
-groupList.onclick = async (e) => {
-  const item = e.target.closest('button') && e.target.closest('li');
-  if (!item) return;
-  const name = item.dataset.group;
-  if (!confirm('"' + name + '" 그룹을 삭제할까요? 이 그룹의 프로젝트는 미분류로 옮겨집니다.')) return;
-  try {
-    showGroups(await (await post('/groups/delete', { name })).json());
-    note(groupsNote, 'ok', '삭제했습니다.');
-  } catch (err) {
-    note(groupsNote, 'err', '삭제하지 못했습니다. ' + err.message);
-  }
-};
-projectForm.onsubmit = async (e) => {
-  e.preventDefault();
-  const body = [...projectForm.querySelectorAll('tr[data-name]')].map((row) => ({
-    name: row.dataset.name,
-    alias: row.querySelector('[name=alias]').value,
-    group: row.querySelector('[name=group]').value,
-  }));
-  note(projectNote, '', '저장 중...');
-  try {
-    await post('/projects', body);
-    note(projectNote, 'ok', '저장했습니다.');
-  } catch (err) {
-    note(projectNote, 'err', '저장하지 못했습니다. ' + err.message);
-  }
-};
+  const card = form.closest('.pcard');
+  if (await saveCard(card, form.elements.alias.value, form.elements.group.value)) closeEditor(card);
+});
+// Drag and drop moves a card to another group; the editor's group select does the same without a mouse.
+let dragged = null;
+document.addEventListener('dragstart', (e) => {
+  dragged = e.target.closest && e.target.closest('.pcard');
+  if (dragged) { dragged.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+});
+document.addEventListener('dragend', () => {
+  if (dragged) dragged.classList.remove('dragging');
+  dragged = null;
+  for (const c of document.querySelectorAll('.col.over')) c.classList.remove('over');
+});
+for (const col of document.querySelectorAll('.col')) {
+  col.addEventListener('dragover', (e) => { if (dragged) { e.preventDefault(); col.classList.add('over'); } });
+  col.addEventListener('dragleave', (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove('over'); });
+  col.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    col.classList.remove('over');
+    const card = dragged;
+    if (!card || card.dataset.group === col.dataset.group) return;
+    await saveCard(card, card.querySelector('[name=alias]').defaultValue, col.dataset.group);
+  });
+}
+document.getElementById('board-search').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  for (const card of document.querySelectorAll('.pcard')) card.hidden = Boolean(q) && !card.dataset.search.includes(q);
+});
 </script></html>`;
+};
 
 const BAR_LABELS = { active: '진행 중', done: '완료', failed: '실패', stopped: '중단됨' };
 const barRow = (bar, attrs = '') => `<li${attrs}><span class="name">${escapeHtml(bar.name)}</span><span class="track"><span class="bar ${bar.state}" style="left:${bar.left}%;width:${bar.width}%"></span></span><span class="dur">${escapeHtml(bar.duration)}<span class="sr"> ${BAR_LABELS[bar.state]}</span></span></li>`;
@@ -596,7 +687,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
         .end(run ? timelineSection(runView(run), timelineView(run, db.getSteps(run.id)), heading) : emptyTimeline);
     }
     if (req.method === 'GET' && pathname === '/projects') {
-      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(projectsPage(projects()));
+      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(projectsPage(projects(), db.projectStats(), isRepo));
     }
     if (req.method === 'GET' && pathname === '/runs') {
       const filter = parseRunFilter(new URLSearchParams(query));
