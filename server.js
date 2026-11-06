@@ -473,7 +473,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     }
     let buffered = '';
     const steps = new Map();
-    // One bar per tool call: from the call until its result comes back.
+    // One bar per tool call. The bar lasts until the next call starts; the result only marks a call as done.
     const trackSteps = (e) => {
       for (const c of Array.isArray(e.message?.content) ? e.message.content : []) {
         if (e.type === 'assistant' && c.type === 'tool_use' && typeof c.name === 'string') {

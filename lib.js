@@ -107,15 +107,50 @@ function isLocalRequest(headers, port, requireOrigin) {
   return headers.origin === `http://${headers.host}`;
 }
 
+// Plain Korean names for tools, so the log reads without knowing Claude Code.
+const TOOL_LABELS = {
+  Read: '파일 읽기', Write: '파일 만들기', Edit: '파일 고치기', MultiEdit: '파일 여러 곳 고치기', NotebookEdit: '노트북 고치기',
+  Bash: '명령 실행', BashOutput: '실행 결과 확인', KillShell: '실행 중지', KillBash: '실행 중지',
+  Glob: '파일 찾기', Grep: '파일 내용 검색', LS: '폴더 목록 보기',
+  WebFetch: '웹 페이지 읽기', WebSearch: '웹 검색', TodoWrite: '할 일 목록 정리', Task: '보조 작업 맡기기', Agent: '보조 작업 맡기기',
+  ToolSearch: '사용할 도구 찾기', Skill: '전용 기능 사용', ExitPlanMode: '계획 확정', Monitor: '진행 상황 지켜보기', TaskStop: '보조 작업 중지',
+};
+const NOTION_LABELS = {
+  'get-block-children': '페이지 내용 읽기', 'patch-block-children': '페이지에 내용 추가', 'retrieve-a-block': '블록 읽기',
+  'update-a-block': '블록 고치기', 'delete-a-block': '블록 지우기', 'retrieve-a-page': '페이지 정보 읽기',
+  'retrieve-page-markdown': '페이지 내용 읽기', 'update-page-markdown': '페이지 내용 고치기', 'patch-page': '페이지 속성 바꾸기',
+  'post-page': '새 페이지 만들기', 'move-page': '페이지 옮기기', 'retrieve-a-page-property': '페이지 속성 읽기', 'post-search': '검색',
+  'create-a-comment': '댓글 달기', 'retrieve-a-comment': '댓글 읽기', 'get-self': '연결 계정 확인', 'get-user': '사용자 정보 확인',
+  'get-users': '사용자 목록 확인', 'retrieve-a-database': '데이터베이스 정보 읽기', 'retrieve-a-data-source': '데이터베이스 정보 읽기',
+  'query-data-source': '데이터베이스 항목 조회', 'create-a-data-source': '데이터베이스 만들기', 'update-a-data-source': '데이터베이스 고치기',
+  'list-data-source-templates': '데이터베이스 템플릿 보기',
+};
+
+// MCP tools are named mcp__<server>__<tool>. Unknown names are shown as they are.
+function toolLabel(name) {
+  if (Object.hasOwn(TOOL_LABELS, name)) return TOOL_LABELS[name];
+  const mcp = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(name);
+  if (!mcp) return name;
+  const [, server, tool] = mcp;
+  if (server === 'notion') {
+    const action = tool.replace(/^API-/, '');
+    return `노션 ${Object.hasOwn(NOTION_LABELS, action) ? NOTION_LABELS[action] : '작업'}`;
+  }
+  return `${server} 연결 기능 (${tool})`;
+}
+
+const SYSTEM_LABELS = { init: '작업 환경을 준비했습니다.', compact_boundary: '대화가 길어져 앞부분을 요약했습니다.' };
+
 // Tool names only: tool input/output could contain secrets.
 function formatEvent(line) {
   let e;
   try { e = JSON.parse(line); } catch { return line; }
   if (e.type === 'assistant') {
     return (e.message?.content || [])
-      .map((c) => (c.type === 'text' ? c.text : c.type === 'tool_use' ? `[도구] ${c.name}` : ''))
+      .map((c) => (c.type === 'text' ? c.text : c.type === 'tool_use' ? `[도구] ${toolLabel(c.name)}` : ''))
       .filter(Boolean).join('\n') || null;
   }
+  if (e.type === 'system' && Object.hasOwn(SYSTEM_LABELS, e.subtype)) return SYSTEM_LABELS[e.subtype];
   return null;
 }
 
@@ -138,7 +173,8 @@ function formatDuration(ms) {
 
 const MIN_BAR = 0.5;
 
-// Positions are percentages of the whole run. A call with no result is still going only while the run is.
+// Positions are percentages of the whole run. Each step lasts until the next one starts (the last one until the
+// run ends), and the time before the first call is its own row, so the rows add up to the total.
 function timelineView(run, steps, now = Date.now()) {
   const start = Date.parse(run.started_at);
   const end = run.finished_at ? Date.parse(run.finished_at) : now;
@@ -150,14 +186,17 @@ function timelineView(run, steps, now = Date.now()) {
   };
   const live = run.status === 'running';
   const runState = live ? 'active' : { success: 'done', failed: 'failed' }[run.status] || 'stopped';
-  return {
-    total: bar('전체', start, end, runState),
-    steps: steps.map((s) => {
-      const from = Date.parse(s.started_at);
-      if (s.finished_at) return bar(s.name, from, Date.parse(s.finished_at), 'done');
-      return bar(s.name, from, Math.max(end, from), live ? 'active' : 'stopped');
-    }),
-  };
+  // Clamped and kept in order, so no row is negative or outside the run.
+  let last = start;
+  const starts = steps.map((s) => (last = Math.min(Math.max(Date.parse(s.started_at) || last, last), Math.max(end, start))));
+  const rows = steps.map((s, i) => {
+    const from = starts[i];
+    if (i + 1 < steps.length) return bar(toolLabel(s.name), from, starts[i + 1], 'done');
+    const state = live ? 'active' : s.finished_at ? 'done' : 'stopped';
+    return bar(toolLabel(s.name), from, Math.max(end, from), state);
+  });
+  if (steps.length && starts[0] > start) rows.unshift(bar('시작 준비', start, starts[0], 'done'));
+  return { total: bar('전체', start, end, runState), steps: rows };
 }
 
 const SUMMARY_MAX = 100;
@@ -182,5 +221,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel,
 };

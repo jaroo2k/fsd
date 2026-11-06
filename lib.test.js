@@ -138,7 +138,7 @@ test('tool calls are timed and shown as bars in the detailed view', async () => 
   assert.ok(!detail.includes('class="timeline"'), 'simple view has no bars');
   assert.ok(detail.includes('href="?view=time"'), 'simple view links to the detailed view');
   assert.match(timeline, /<li><span class="name">Read&#60;x&#62;<\/span><span class="track"><span class="bar done"/);
-  assert.match(timeline, /<span class="name">Bash<\/span><span class="track"><span class="bar stopped"/, 'a call with no result is not shown as done');
+  assert.match(timeline, /<span class="name">명령 실행<\/span><span class="track"><span class="bar stopped"/, 'a call with no result is not shown as done');
   assert.match(timeline, /class="total"><span class="name">전체<\/span><span class="track"><span class="bar done"/);
   for (const hidden of ['secret.txt', 'top secret', 'echo hidden']) assert.ok(!timeline.includes(hidden), `${hidden} is not shown`);
   assert.ok(live.includes('<span class="name">Read&#60;x&#62;</span>'), 'home page fragment shows the same bars');
@@ -161,6 +161,44 @@ test('home page has a live timeline that is empty before any run', async () => {
   }
 });
 
+test('step bars run until the next step starts, so they add up to the total', () => {
+  const { timelineView } = require('./lib');
+  const at = (s) => new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString();
+  const run = { status: 'success', started_at: at(0), finished_at: at(20) };
+  const view = timelineView(run, [
+    { name: 'Read', started_at: at(2), finished_at: at(3) },
+    { name: 'Grep', started_at: at(6), finished_at: at(7) },
+    { name: 'Edit', started_at: at(6), finished_at: at(7) },
+    { name: 'Bash', started_at: at(12), finished_at: at(15) },
+  ]);
+  assert.deepStrictEqual(view.steps.map((b) => [b.name, b.duration, b.state]), [
+    ['시작 준비', '2.0초', 'done'], ['파일 읽기', '4.0초', 'done'], ['파일 내용 검색', '0.0초', 'done'],
+    ['파일 고치기', '6.0초', 'done'], ['명령 실행', '8.0초', 'done'],
+  ]);
+  const seconds = (b) => Number.parseFloat(b.duration);
+  assert.strictEqual(view.steps.reduce((sum, b) => sum + seconds(b), 0), 20);
+  assert.strictEqual(view.total.duration, '20초');
+  const widths = view.steps.filter((b) => seconds(b) > 0).reduce((sum, b) => sum + b.width, 0);
+  assert.ok(Math.abs(widths - 100) < 1e-9, 'bars fill the whole track');
+  const late = timelineView(run, [{ name: 'Read', started_at: at(30), finished_at: at(31) }]);
+  assert.ok(late.steps.every((b) => b.left + b.width <= 100), 'a call after the run end stays inside');
+  assert.deepStrictEqual(timelineView(run, []).steps, [], 'no calls, no rows');
+});
+
+test('tool names are shown in plain Korean in the live log', () => {
+  const { formatEvent, toolLabel } = require('./lib');
+  const tool = (name) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input: { command: 'secret' } }] } });
+  assert.strictEqual(formatEvent(tool('Bash')), '[도구] 명령 실행');
+  assert.strictEqual(formatEvent(tool('mcp__notion__API-patch-block-children')), '[도구] 노션 페이지에 내용 추가');
+  assert.strictEqual(toolLabel('mcp__notion__API-new-thing'), '노션 작업');
+  assert.strictEqual(toolLabel('mcp__my_db__query'), 'my_db 연결 기능 (query)');
+  assert.strictEqual(toolLabel('Unknown'), 'Unknown');
+  assert.strictEqual(toolLabel('constructor'), 'constructor');
+  assert.strictEqual(formatEvent(JSON.stringify({ type: 'system', subtype: 'init', tools: ['Bash'] })), '작업 환경을 준비했습니다.');
+  assert.strictEqual(formatEvent(JSON.stringify({ type: 'system', subtype: 'other' })), null);
+  assert.strictEqual(formatEvent('plain text'), 'plain text');
+});
+
 test('timeline bars stay inside the run and show live state', () => {
   const { timelineView, formatDuration } = require('./lib');
   const at = (s) => new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString();
@@ -171,11 +209,11 @@ test('timeline bars stay inside the run and show live state', () => {
   ];
   const view = timelineView(run, steps, Date.parse(at(10)));
   assert.deepStrictEqual(view.total, { name: '전체', state: 'active', duration: '10초', left: 0, width: 100 });
-  assert.deepStrictEqual(view.steps[0], { name: 'Read', state: 'done', duration: '5.0초', left: 0, width: 50 });
-  assert.deepStrictEqual(view.steps[1], { name: 'Bash', state: 'active', duration: '5.0초', left: 50, width: 50 });
+  assert.deepStrictEqual(view.steps[0], { name: '파일 읽기', state: 'done', duration: '5.0초', left: 0, width: 50 });
+  assert.deepStrictEqual(view.steps[1], { name: '명령 실행', state: 'active', duration: '5.0초', left: 50, width: 50 });
   const done = timelineView({ ...run, status: 'failed', finished_at: at(8) }, steps, Date.parse(at(99)));
   assert.strictEqual(done.total.state, 'failed');
-  assert.deepStrictEqual(done.steps[1], { name: 'Bash', state: 'stopped', duration: '3.0초', left: 62.5, width: 37.5 });
+  assert.deepStrictEqual(done.steps[1], { name: '명령 실행', state: 'stopped', duration: '3.0초', left: 62.5, width: 37.5 });
   const tiny = timelineView({ ...run, status: 'success', finished_at: at(100) }, [{ name: 'x', started_at: at(100), finished_at: at(100) }]);
   assert.ok(tiny.steps[0].width > 0 && tiny.steps[0].left + tiny.steps[0].width <= 100, 'a zero-length call is still visible inside the track');
   assert.deepStrictEqual([0.4, 12, 185, 3725].map((s) => formatDuration(s * 1000)), ['0.4초', '12초', '3분 5초', '1시간 2분']);
