@@ -166,17 +166,16 @@ function maskSecrets(text, known = []) {
   return out;
 }
 
-const DETAIL_MAX = 80;
+const DETAIL_MAX = 40;
 
-// Only what a command was run for: Claude's own description when it gave one, otherwise the command's first line.
-// Other tool input and all output stay hidden, since they could contain secrets.
+// Only Claude's own short description of what a command was for, never the command itself. Other tool input and
+// all output stay hidden, since they could contain secrets.
 function toolDetail(c) {
   if (c.name !== 'Bash' || !c.input || typeof c.input !== 'object') return '';
-  const { description, command } = c.input;
-  const text = (typeof description === 'string' && description.trim()) || (typeof command === 'string' ? command.trim() : '');
-  const [first = '', ...rest] = text.split('\n');
-  const line = first.trim();
-  return line.length > DETAIL_MAX ? `${line.slice(0, DETAIL_MAX)}…` : rest.length ? `${line} …` : line;
+  const { description } = c.input;
+  if (typeof description !== 'string') return '';
+  const line = description.trim().split('\n')[0].trim();
+  return line.length > DETAIL_MAX ? `${line.slice(0, DETAIL_MAX)}…` : line;
 }
 
 function formatEvent(line) {
@@ -257,12 +256,21 @@ function timelineView(run, steps, now = Date.now()) {
   // Clamped and kept in order, so no row is negative or outside the run.
   let last = start;
   const starts = steps.map((s) => (last = Math.min(Math.max(Date.parse(s.started_at) || last, last), Math.max(end, start))));
-  const rows = steps.map((s, i) => {
+  // Back-to-back calls with the same label become one row spanning all of them, named with the call count.
+  const rows = [];
+  for (let i = 0; i < steps.length; i += 1) {
+    const label = toolLabel(steps[i].name);
+    let j = i;
+    while (j + 1 < steps.length && toolLabel(steps[j + 1].name) === label) j += 1;
+    const name = j > i ? `${label} ×${j - i + 1}` : label;
     const from = starts[i];
-    if (i + 1 < steps.length) return bar(toolLabel(s.name), from, starts[i + 1], 'done');
-    const state = live ? 'active' : s.finished_at ? 'done' : 'stopped';
-    return bar(toolLabel(s.name), from, Math.max(end, from), state);
-  });
+    if (j + 1 < steps.length) rows.push(bar(name, from, starts[j + 1], 'done'));
+    else {
+      const state = live ? 'active' : steps[j].finished_at ? 'done' : 'stopped';
+      rows.push(bar(name, from, Math.max(end, from), state));
+    }
+    i = j;
+  }
   if (steps.length && starts[0] > start) rows.unshift(bar('시작 준비', start, starts[0], 'done'));
   return { total: bar('전체', start, end, runState), steps: rows };
 }
