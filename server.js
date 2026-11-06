@@ -15,6 +15,10 @@ const darkVars = `--bg:#0e1420;--surface:#162033;--border:#25324a;--field-border
 --log-bg:#111a2b;--log-text:#c3cde0;--log-empty:#7d8aa3;
 --track:#22304a;--bar-active:#f2c94c;--bar-done:#5cc794;--bar-failed:#f87171;--bar-stopped:#6b7790`;
 
+// Inline the shared vector so every page and Docker image use the same logo.
+const logoSvg = fs.readFileSync(path.join(__dirname, 'assets/logo.svg'), 'utf8').trim();
+const favicon = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(logoSvg.replace('<svg ', '<svg color="#345fc7" '))}">`;
+
 const style = `<style>
 :root{color-scheme:light dark;--bg:#f3f6fb;--surface:#fff;--border:#e0e7f0;--field-border:#dce3ef;--text:#263550;--muted:#66748c;
 --accent:#345fc7;--accent-hover:#2a4fa8;--accent-soft:#e5edff;--on-accent:#fff;--field:#fbfcff;--ok:#1f7a4f;--err:#b42318;
@@ -36,7 +40,9 @@ h2{margin:0 0 1.25rem;font-size:1.05rem;letter-spacing:-.02em}
 .gnb-inner{display:flex;align-items:center;gap:3rem;max-width:1240px;height:4.5rem;margin:0 auto;padding:0 1.5rem}
 .gnb-brand{display:flex;align-items:center;gap:.6rem;flex:none;color:var(--text);font-weight:700;white-space:nowrap}
 .gnb-brand{font-size:1.1rem}.gnb-brand:hover{text-decoration:none}
-.gnb-brand .mark{width:2.1rem;height:2.2rem;border:2px solid var(--accent);border-radius:6px;background:transparent;color:var(--accent);font:1.6rem Georgia,"Times New Roman",serif}
+.gnb-brand .mark{display:block;width:2.5rem;height:2.5rem;border-radius:0;background:transparent;color:var(--accent)}
+.gnb-brand .mark svg{display:block;width:100%;height:100%}
+.gnb-brand:focus-visible{outline:2px solid var(--accent);outline-offset:5px;border-radius:4px}
 .gnb nav{display:flex;align-items:stretch;align-self:stretch;gap:1.25rem}
 .gnb nav a{display:flex;align-items:center;padding:0 .25rem;border-bottom:3px solid transparent;color:var(--muted);font-size:.925rem;font-weight:600;white-space:nowrap}
 .gnb nav a:hover{text-decoration:none;color:var(--text)}
@@ -159,7 +165,7 @@ button.link{height:auto;padding:0;background:none;color:var(--accent);font-size:
 // Global navigation shown on every page; `current` marks the active menu.
 const gnb = (current) => {
   const item = (key, href, label) => `<a href="${href}"${current === key ? ' aria-current="page"' : ''}>${label}</a>`;
-  return `<header class="gnb"><div class="gnb-inner"><a class="gnb-brand" href="/"><span class="mark" aria-hidden="true">N</span><span class="name">노션 개발 러너</span></a>
+  return `<header class="gnb"><div class="gnb-inner"><a class="gnb-brand" href="/" aria-label="노션 개발 러너 홈"><span class="mark" aria-hidden="true">${logoSvg}</span><span class="name">노션 개발 러너</span></a>
 <nav aria-label="주 메뉴">${item('history', '/', '업무 내역')}${item('execute', '/execute', '업무 실행')}${item('projects', '/projects', '프로젝트 관리')}</nav>
 <button type="button" class="theme-toggle" id="theme-toggle" aria-label="다크 모드로 변경"></button></div></header>
 <script>
@@ -187,7 +193,7 @@ const gnb = (current) => {
 
 // 업무 내역 (main page): searchable list of past runs, refreshed when a run starts or ends.
 const historyPage = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>업무 내역 - 노션 개발 러너</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">${favicon}<title>업무 내역 - 노션 개발 러너</title>
 ${style}
 ${gnb('history')}
 <main>
@@ -283,7 +289,7 @@ es.addEventListener('runs', loadRuns);
 
 // 업무 실행: start a run and follow its time bars and live log.
 const executePage = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>업무 실행 - 노션 개발 러너</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">${favicon}<title>업무 실행 - 노션 개발 러너</title>
 ${style}
 ${gnb('execute')}
 <main>
@@ -394,7 +400,7 @@ const projectsPage = ({ rows, groups }, stats, isGit) => {
 <p class="drop">여기로 끌어 놓기</p></section>`;
   };
   return `<!doctype html><html lang="ko"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>프로젝트 관리 - 노션 개발 러너</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">${favicon}<title>프로젝트 관리 - 노션 개발 러너</title>
 ${style}
 ${gnb('projects')}
 <main>
@@ -526,7 +532,7 @@ const emptyTimeline = '<section class="card"><h2>작업 시간</h2><p class="mut
 
 // timeline is null in the simple view.
 const detailPage = (run, logs, alias, timeline) => `<!doctype html><html lang="ko"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(run.title)}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">${favicon}<title>${escapeHtml(run.title)}</title>
 ${['queued', 'running'].includes(run.status) ? '<meta http-equiv="refresh" content="3">' : ''}
 ${style}
 ${gnb('history')}

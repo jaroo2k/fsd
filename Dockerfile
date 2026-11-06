@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && git config --system --add safe.directory '*'
 WORKDIR /app
 COPY server.js lib.js db.js prompt.md prompt-task.md mcp.json ./
+COPY assets/ ./assets/
 # An empty named volume inherits this owner, so the node user can write the database. Codex writes its sessions
 # next to the mounted auth.json, so its folder must belong to node too.
 RUN mkdir -p /data /home/node/.codex && chown node:node /data /home/node/.codex
