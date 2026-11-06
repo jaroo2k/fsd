@@ -1,6 +1,10 @@
 services:
   runner:
     build: .
+    # Runs the code in this folder (/workspace/fsd) instead of the copy in the image, so a code change
+    # needs only "docker compose restart runner". Rebuild only when the Dockerfile changes.
+    # No --watch: a run that edits this repo would restart the server and cut itself off.
+    command: ["node", "/workspace/fsd/server.js"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:4317:4317"
