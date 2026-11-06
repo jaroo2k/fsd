@@ -21,8 +21,9 @@ const style = `<style>
 --log-bg:#111a2b;--log-text:#c3cde0;--log-empty:#7d8aa3;
 --track:#22304a;--bar-active:#f2c94c;--bar-done:#5cc794;--bar-failed:#f87171;--bar-stopped:#6b7790}}
 *{box-sizing:border-box}
+html{font-size:14px}
 body{margin:0;background:var(--bg);color:var(--text);word-break:keep-all;
-font:16px/1.5 system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",sans-serif}
+font:1rem/1.5 system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",sans-serif}
 main{max-width:1240px;margin:0 auto;padding:2.25rem 1.5rem 4rem}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 h1{margin:0;font-size:2rem;line-height:1.25;letter-spacing:-.04em;overflow-wrap:anywhere}
@@ -237,7 +238,7 @@ ${gnb('execute')}
 <div class="submit"><span>Ctrl + Enter로 시작</span><button>시작</button></div></form>
 <p id="status" role="status"></p>
 </section>
-<div id="timeline"></div>
+<div id="timeline">${emptyTimeline}</div>
 <details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
 </div>
 </main>
@@ -391,6 +392,9 @@ ${run.status === 'queued' ? '<p class="muted">아직 시작하지 않았습니�
 <ol class="timeline">${barRow(timeline.total, ' class="total"')}${timeline.steps.map((bar) => barRow(bar)).join('')}</ol>
 ${timeline.steps.length ? '' : '<p class="muted">도구 기록이 없습니다. 이 기능을 넣기 전의 작업이거나 도구를 쓰지 않은 작업입니다.</p>'}`}
 </section>`;
+
+// Shown on the execute page before any run, so the card keeps its place.
+const emptyTimeline = '<section class="card"><h2>작업 시간</h2><p class="muted">아직 실행한 업무가 없습니다. 업무를 시작하면 단계별 시간이 표시됩니다.</p></section>';
 
 // timeline is null in the simple view.
 const detailPage = (run, logs, alias, timeline) => `<!doctype html><html lang="ko"><meta charset="utf-8">
@@ -589,7 +593,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       const run = lastRunId && db.getRun(lastRunId);
       const heading = run && `작업 시간 · <a href="/runs/${run.id}?view=time">${escapeHtml(run.title)}</a>`;
       return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-        .end(run ? timelineSection(runView(run), timelineView(run, db.getSteps(run.id)), heading) : '');
+        .end(run ? timelineSection(runView(run), timelineView(run, db.getSteps(run.id)), heading) : emptyTimeline);
     }
     if (req.method === 'GET' && pathname === '/projects') {
       return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(projectsPage(projects()));
