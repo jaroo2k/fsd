@@ -1,7 +1,10 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+
+const execFileAsync = promisify(execFile);
 const {
   AGENTS, codexTranslator, listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog, maskSecrets,
 } = require('./lib');
@@ -620,29 +623,33 @@ function createApp({ root, start = runAgent, db = openDb(':memory:') }) {
   const isRepo = (project) => fs.existsSync(path.join(root, project, '.git'));
 
   // Done when a run starts, not when it is queued: an earlier run may still be changing the same tree.
-  function createBranch(project) {
+  // Async: git status on a big repo over the Windows bind mount can take minutes, and a sync call froze every page.
+  async function createBranch(project) {
     const cwd = path.join(root, project);
     if (!isRepo(project)) throw new Error('git 저장소가 아닙니다.');
-    const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
-    if (git('status', '--porcelain').trim()) throw new Error('커밋하지 않은 변경이 있습니다.');
+    const git = async (...args) => (await execFileAsync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })).stdout;
+    if ((await git('status', '--porcelain')).trim()) throw new Error('커밋하지 않은 변경이 있습니다.');
     const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
     const base = `notion/${stamp}`;
     // A queued run can start within the same second when the one before it fails fast.
     let branch = base;
-    for (let n = 2; git('branch', '--list', branch).trim(); n += 1) branch = `${base}-${n}`;
-    git('switch', '-c', branch);
+    for (let n = 2; (await git('branch', '--list', branch)).trim(); n += 1) branch = `${base}-${n}`;
+    await git('switch', '-c', branch);
     return branch;
   }
 
   // A run that can't start is recorded as failed and the queue moves on, so one bad job doesn't block the rest.
-  function startNext() {
+  // While the branch is being made the job counts as current, so new requests queue behind it and duplicates are refused.
+  async function startNext() {
     const job = queue.shift();
     if (!job) return;
+    current = job;
     let branch;
     try {
-      branch = createBranch(job.project);
+      branch = await createBranch(job.project);
       db.startRun(job.runId, branch);
     } catch (err) {
+      current = null;
       const message = `실패: ${err.message}`;
       emit(`${job.project} ${message}`);
       record(() => db.appendLog(job.runId, clean(message)));
@@ -828,16 +835,17 @@ function createApp({ root, start = runAgent, db = openDb(':memory:') }) {
       const same = (other) => other.project === job.project && other.url === url && other.task === task;
       if ((current && same(current)) || queue.some(same)) return send(409, '같은 작업이 이미 실행 중이거나 대기 중입니다.');
       try {
-        if (current) {
-          if (!isRepo(input.project)) return send(400, 'git 저장소가 아닙니다.');
-          const runId = db.enqueueRun(job);
-          queue.push({ runId, ...job });
-          notifyRuns();
-          return send(202, `대기 중입니다. 앞선 작업이 끝나면 순서대로 시작합니다. (대기 ${queue.length}번째)`);
+        if (!isRepo(input.project)) return send(400, 'git 저장소가 아닙니다.');
+        // Every run goes through the queue, so the slow branch check never holds up this response.
+        const busy = Boolean(current);
+        const runId = db.enqueueRun(job);
+        queue.push({ runId, ...job });
+        notifyRuns();
+        if (!busy) {
+          startNext();
+          return send(202, '시작 준비 중입니다. 변경 사항을 확인하고 브랜치를 만든 뒤 시작합니다. 결과는 실시간 로그와 업무 내역에 표시됩니다.');
         }
-        const branch = createBranch(input.project);
-        launch(db.createRun({ ...job, branch }), job, branch);
-        return send(202, '시작했습니다.');
+        return send(202, `대기 중입니다. 앞선 작업이 끝나면 순서대로 시작합니다. (대기 ${queue.length}번째)`);
       } catch (err) {
         return send(400, err.message);
       }
