@@ -35,7 +35,6 @@ h2{margin:0 0 .85rem;font-size:1.05rem}
 .gnb nav a[aria-current]{color:var(--accent);border-bottom-color:var(--accent)}
 .brand{margin-bottom:1.75rem}
 .brand p{margin:.1rem 0 0;color:var(--muted);font-size:.95rem}
-#history{scroll-margin-top:4.75rem}
 .mark{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:.8rem;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;box-shadow:var(--shadow);padding:1.25rem;margin-bottom:1.25rem}
 #f{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:1rem;align-items:end}
@@ -116,37 +115,26 @@ pre:empty::before{content:"표시할 로그가 없습니다.";color:#8a93a3}
 const gnb = (current) => {
   const item = (key, href, label) => `<a href="${href}"${current === key ? ' aria-current="page"' : ''}>${label}</a>`;
   return `<header class="gnb"><div class="gnb-inner"><a class="gnb-brand" href="/"><span class="mark" aria-hidden="true">N</span><span class="name">노션 개발 러너</span></a>
-<nav aria-label="주 메뉴">${item('runs', '/#history', '작업 기록')}${item('projects', '/projects', '프로젝트 관리')}</nav></div></header>`;
+<nav aria-label="주 메뉴">${item('history', '/', '업무 내역')}${item('execute', '/execute', '업무 실행')}${item('projects', '/projects', '프로젝트 관리')}</nav></div></header>`;
 };
 
-const page = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>노션 개발 러너</title>
+// 업무 내역 (main page): searchable list of past runs, refreshed when a run starts or ends.
+const historyPage = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>업무 내역 - 노션 개발 러너</title>
 ${style}
-${gnb('runs')}
+${gnb('history')}
 <main>
-<header class="brand"><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></header>
+<header class="title"><h1>업무 내역</h1></header>
 <section class="card">
-<form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
-<label class="url">노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..."></label>
-<label class="task">업무 내용 추가<textarea name="task" rows="4" maxlength="${MAX_TASK_LENGTH}" aria-describedby="task-hint" placeholder="예: 주문 목록에 검색 기능 추가"></textarea>
-<span class="hint" id="task-hint">노션 링크가 없으면 이 내용으로 개발합니다. 둘 다 입력하면 노션 문서의 지시에 더해 반영합니다. Ctrl+Enter로 시작합니다.</span></label><button>시작</button></form>
-<p id="status" role="status"></p>
-</section>
-<div id="timeline"></div>
-<details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
-<section class="card" id="history"><h2>작업 기록</h2>
 <form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
 <label>프로젝트<select name="project">${projectOptions(projects, '전체')}</select></label>
 <label>날짜<input name="date" type="date"></label>
 <button>검색</button><button type="reset" class="secondary">초기화</button></form>
 <table class="runs"><thead><tr><th>제목</th><th>프로젝트</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
 <p id="runs-note" role="status"></p>
-<nav id="pager" aria-label="작업 기록 페이지" hidden><button id="prev" type="button" class="secondary">이전</button><span id="page-info"></span><button id="next" type="button" class="secondary">다음</button></nav></section>
+<nav id="pager" aria-label="업무 내역 페이지" hidden><button id="prev" type="button" class="secondary">이전</button><span id="page-info"></span><button id="next" type="button" class="secondary">다음</button></nav></section>
 </main>
 <script>
-const log = document.getElementById('log');
-// A collapsed log cannot scroll, so catch up on the lines that arrived meanwhile.
-document.getElementById('log-card').addEventListener('toggle', (e) => { if (e.target.open) log.scrollTop = log.scrollHeight; });
 const runsEl = document.getElementById('runs');
 const runsNote = document.getElementById('runs-note');
 const searchForm = document.getElementById('search');
@@ -188,7 +176,7 @@ async function loadRuns() {
     pageInfo.textContent = page + ' / ' + lastPage + ' 페이지 (총 ' + total + '건)';
     prev.disabled = page <= 1;
     next.disabled = page >= lastPage;
-    runsNote.textContent = runs.length ? '' : (filter.size ? '검색 결과가 없습니다.' : '작업 기록이 없습니다.');
+    runsNote.textContent = runs.length ? '' : (filter.size ? '검색 결과가 없습니다.' : '업무 내역이 없습니다.');
     runsEl.replaceChildren(...runs.map((r) => {
       const link = document.createElement('a');
       link.href = '/runs/' + r.id;
@@ -203,7 +191,7 @@ async function loadRuns() {
       return row;
     }));
   } catch {
-    if (load === latestLoad) runsNote.textContent = '작업 기록을 불러오지 못했습니다.';
+    if (load === latestLoad) runsNote.textContent = '업무 내역을 불러오지 못했습니다.';
   }
 }
 searchForm.onsubmit = (e) => {
@@ -220,6 +208,33 @@ searchForm.onreset = () => {
 };
 prev.onclick = () => { currentPage -= 1; loadRuns(); };
 next.onclick = () => { currentPage += 1; loadRuns(); };
+// The list only follows run changes; log lines are for the 업무 실행 page.
+const es = new EventSource('/events');
+es.onopen = loadRuns;
+es.addEventListener('runs', loadRuns);
+</script></html>`;
+
+// 업무 실행: start a run and follow its time bars and live log.
+const executePage = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>업무 실행 - 노션 개발 러너</title>
+${style}
+${gnb('execute')}
+<main>
+<header class="brand"><h1>업무 실행</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></header>
+<section class="card">
+<form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
+<label class="url">노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..."></label>
+<label class="task">업무 내용 추가<textarea name="task" rows="4" maxlength="${MAX_TASK_LENGTH}" aria-describedby="task-hint" placeholder="예: 주문 목록에 검색 기능 추가"></textarea>
+<span class="hint" id="task-hint">노션 링크가 없으면 이 내용으로 개발합니다. 둘 다 입력하면 노션 문서의 지시에 더해 반영합니다. Ctrl+Enter로 시작합니다.</span></label><button>시작</button></form>
+<p id="status" role="status"></p>
+</section>
+<div id="timeline"></div>
+<details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
+</main>
+<script>
+const log = document.getElementById('log');
+// A collapsed log cannot scroll, so catch up on the lines that arrived meanwhile.
+document.getElementById('log-card').addEventListener('toggle', (e) => { if (e.target.open) log.scrollTop = log.scrollHeight; });
 const timelineEl = document.getElementById('timeline');
 let timelineTimer;
 const scheduleTimeline = (ms) => { clearTimeout(timelineTimer); timelineTimer = setTimeout(loadTimeline, ms); };
@@ -240,8 +255,8 @@ async function loadTimeline() {
   if (timelineEl.querySelector('.timeline .bar.active')) scheduleTimeline(2000);
 }
 const es = new EventSource('/events');
-es.onopen = () => { log.textContent = ''; loadRuns(); loadTimeline(); };
-es.addEventListener('runs', () => { loadRuns(); scheduleTimeline(100); });
+es.onopen = () => { log.textContent = ''; loadTimeline(); };
+es.addEventListener('runs', () => scheduleTimeline(100));
 const status = document.getElementById('status');
 es.onmessage = (e) => {
   scheduleTimeline(300);
@@ -367,9 +382,9 @@ const detailPage = (run, logs, alias, timeline) => `<!doctype html><html lang="k
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(run.title)}</title>
 ${['queued', 'running'].includes(run.status) ? '<meta http-equiv="refresh" content="3">' : ''}
 ${style}
-${gnb('runs')}
+${gnb('history')}
 <main>
-<a class="back" href="/#history">← 작업 기록</a>
+<a class="back" href="/">← 업무 내역</a>
 <header class="title"><h1>${escapeHtml(run.title)}</h1><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></header>
 <nav class="views" aria-label="보기 방식">${timeline
     ? `<a href="/runs/${run.id}">간단히</a><a href="?view=time" aria-current="page">자세히</a>`
@@ -412,7 +427,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
   };
   // These run from stream callbacks, where a throw would take the whole server down mid-run.
   const record = (write) => {
-    try { write(); } catch (err) { console.error(`작업 기록 저장 실패: ${err.message}`); }
+    try { write(); } catch (err) { console.error(`업무 내역 저장 실패: ${err.message}`); }
   };
 
   const isRepo = (project) => fs.existsSync(path.join(root, project, '.git'));
@@ -534,9 +549,12 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     const isPost = req.method === 'POST';
     if (!isLocalRequest(req.headers, port, isPost)) return send(403, '로컬 요청만 허용합니다.');
 
+    // no-store: returning from the management page must show the saved project names.
     if (req.method === 'GET' && req.url === '/') {
-      // no-store: returning from the management page must show the saved project names.
-      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(page(projects()));
+      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(historyPage(projects()));
+    }
+    if (req.method === 'GET' && req.url === '/execute') {
+      return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(executePage(projects()));
     }
     if (req.method === 'GET' && req.url === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
