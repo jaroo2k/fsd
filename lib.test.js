@@ -99,8 +99,10 @@ async function recordRun(start, db = openDb(':memory:')) {
     await closed;
     const { runs } = await (await fetch(`${base}/runs`)).json();
     const detail = await (await fetch(`${base}/runs/${runs[0].id}`)).text();
+    const timeline = await (await fetch(`${base}/runs/${runs[0].id}?view=time`)).text();
+    const live = await (await fetch(`${base}/timeline`)).text();
     const again = await post();
-    return { res, runs, detail, again };
+    return { res, runs, detail, timeline, live, again };
   } finally {
     app.closeAllConnections();
     app.close();
@@ -120,6 +122,61 @@ test('successful run is listed with its status and log', async () => {
   assert.ok(runs[0].finished_at);
   assert.ok(detail.includes('작업 &#60;중&#62;'), 'log is escaped');
   assert.ok(!detail.includes('http-equiv="refresh"'), 'finished page stops refreshing');
+});
+
+test('tool calls are timed and shown as bars in the detailed view', async () => {
+  const { runs, detail, timeline, live } = await recordRun(node(`
+    const say = (o) => console.log(JSON.stringify(o));
+    say({type:'assistant',message:{content:[{type:'tool_use',id:'t1',name:'Read<x>',input:{file_path:'secret.txt'}}]}});
+    setTimeout(() => {
+      say({type:'user',message:{content:[{type:'tool_result',tool_use_id:'t1',content:'top secret'}]}});
+      say({type:'assistant',message:{content:[{type:'tool_use',id:'t2',name:'Bash',input:{command:'echo hidden'}}]}});
+      say({type:'result',is_error:false});
+    }, 150);`));
+  assert.ok(!detail.includes('class="timeline"'), 'simple view has no bars');
+  assert.ok(detail.includes('href="?view=time"'), 'simple view links to the detailed view');
+  assert.match(timeline, /<li><span class="name">Read&#60;x&#62;<\/span><span class="track"><span class="bar done"/);
+  assert.match(timeline, /<span class="name">Bash<\/span><span class="track"><span class="bar stopped"/, 'a call with no result is not shown as done');
+  assert.match(timeline, /class="total"><span class="name">전체<\/span><span class="track"><span class="bar done"/);
+  for (const hidden of ['secret.txt', 'top secret', 'echo hidden']) assert.ok(!timeline.includes(hidden), `${hidden} is not shown`);
+  assert.ok(live.includes('<span class="name">Read&#60;x&#62;</span>'), 'home page fragment shows the same bars');
+  assert.ok(live.includes(`href="/runs/${runs[0].id}?view=time"`), 'home page fragment links to the run');
+  assert.ok(!live.includes('<html'), 'home page gets a fragment, not a page');
+});
+
+test('home page has a live timeline that is empty before any run', async () => {
+  const app = createApp({ root: tmp });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  try {
+    assert.ok((await (await fetch(base)).text()).includes('id="timeline"'));
+    const res = await fetch(`${base}/timeline`);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(await res.text(), '');
+  } finally {
+    app.closeAllConnections();
+    app.close();
+  }
+});
+
+test('timeline bars stay inside the run and show live state', () => {
+  const { timelineView, formatDuration } = require('./lib');
+  const at = (s) => new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString();
+  const run = { status: 'running', started_at: at(0), finished_at: null };
+  const steps = [
+    { name: 'Read', started_at: at(0), finished_at: at(5) },
+    { name: 'Bash', started_at: at(5), finished_at: null },
+  ];
+  const view = timelineView(run, steps, Date.parse(at(10)));
+  assert.deepStrictEqual(view.total, { name: '전체', state: 'active', duration: '10초', left: 0, width: 100 });
+  assert.deepStrictEqual(view.steps[0], { name: 'Read', state: 'done', duration: '5.0초', left: 0, width: 50 });
+  assert.deepStrictEqual(view.steps[1], { name: 'Bash', state: 'active', duration: '5.0초', left: 50, width: 50 });
+  const done = timelineView({ ...run, status: 'failed', finished_at: at(8) }, steps, Date.parse(at(99)));
+  assert.strictEqual(done.total.state, 'failed');
+  assert.deepStrictEqual(done.steps[1], { name: 'Bash', state: 'stopped', duration: '3.0초', left: 62.5, width: 37.5 });
+  const tiny = timelineView({ ...run, status: 'success', finished_at: at(100) }, [{ name: 'x', started_at: at(100), finished_at: at(100) }]);
+  assert.ok(tiny.steps[0].width > 0 && tiny.steps[0].left + tiny.steps[0].width <= 100, 'a zero-length call is still visible inside the track');
+  assert.deepStrictEqual([0.4, 12, 185, 3725].map((s) => formatDuration(s * 1000)), ['0.4초', '12초', '3분 5초', '1시간 2분']);
 });
 
 test('failed exit, spawn error and sync throw are recorded as failed', async () => {
@@ -152,6 +209,10 @@ test('run detail page escapes stored values and 404s unknown ids', async () => {
     assert.ok(!html.includes('<script>x'));
     assert.ok(!html.includes('/"a'));
     assert.ok(html.includes('http-equiv="refresh"'), 'running page keeps refreshing');
+    const timeline = await (await fetch(`${base}/runs/${id}?view=time`)).text();
+    assert.ok(timeline.includes('도구 기록이 없습니다'), 'runs without tool calls say so');
+    assert.ok(timeline.includes('http-equiv="refresh"'), 'detailed view of a running run keeps refreshing');
+    assert.strictEqual((await fetch(`${base}/runs/${id}?view=<b>`)).status, 200, 'an unknown view falls back to the simple one');
     assert.strictEqual((await fetch(`${base}/runs/999`)).status, 404);
     assert.strictEqual((await fetch(`${base}/runs/abc`)).status, 404);
   } finally {

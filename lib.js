@@ -102,6 +102,40 @@ const runView = (run) => ({
   statusLabel: STATUS_LABELS[run.status] || run.status,
 });
 
+function formatDuration(ms) {
+  const seconds = Math.max(0, ms) / 1000;
+  if (seconds < 10) return `${seconds.toFixed(1)}초`;
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (h) return `${h}시간 ${m}분`;
+  return m ? `${m}분 ${total % 60}초` : `${total}초`;
+}
+
+const MIN_BAR = 0.5;
+
+// Positions are percentages of the whole run. A call with no result is still going only while the run is.
+function timelineView(run, steps, now = Date.now()) {
+  const start = Date.parse(run.started_at);
+  const end = run.finished_at ? Date.parse(run.finished_at) : now;
+  const span = Math.max(end - start, 1);
+  const pct = (ms) => Math.min(100, Math.max(0, (ms / span) * 100));
+  const bar = (name, from, to, state) => {
+    const width = Math.max(pct(to - from), MIN_BAR);
+    return { name, state, duration: formatDuration(to - from), left: Math.min(pct(from - start), 100 - width), width };
+  };
+  const live = run.status === 'running';
+  const runState = live ? 'active' : { success: 'done', failed: 'failed' }[run.status] || 'stopped';
+  return {
+    total: bar('전체', start, end, runState),
+    steps: steps.map((s) => {
+      const from = Date.parse(s.started_at);
+      if (s.finished_at) return bar(s.name, from, Date.parse(s.finished_at), 'done');
+      return bar(s.name, from, Math.max(end, from), live ? 'active' : 'stopped');
+    }),
+  };
+}
+
 const SUMMARY_MAX = 100;
 
 // prompt.md asks for a "작업 요약: ..." line. The last one wins, since earlier text may quote the format.
@@ -124,5 +158,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView,
 };

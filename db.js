@@ -25,6 +25,15 @@ function openDb(file) {
       text TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS run_logs_run_id ON run_logs(run_id);
+    -- Tool name only: inputs and results can hold secrets.
+    CREATE TABLE IF NOT EXISTS run_steps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL REFERENCES runs(id),
+      name TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS run_steps_run_id ON run_steps(run_id);
     CREATE TABLE IF NOT EXISTS projects (
       name TEXT PRIMARY KEY,
       alias TEXT,
@@ -62,6 +71,9 @@ function openDb(file) {
     FROM runs LEFT JOIN projects ON projects.name = runs.project ${FILTER} ORDER BY runs.id DESC LIMIT :limit OFFSET :offset`);
   const selectRun = db.prepare(`SELECT *, ${TITLE} AS title FROM runs WHERE id = ?`);
   const selectLogs = db.prepare('SELECT text FROM run_logs WHERE run_id = ? ORDER BY id');
+  const insertStep = db.prepare('INSERT INTO run_steps (run_id, name, started_at) VALUES (?, ?, ?)');
+  const updateStep = db.prepare('UPDATE run_steps SET finished_at = ? WHERE id = ? AND finished_at IS NULL');
+  const selectSteps = db.prepare('SELECT name, started_at, finished_at FROM run_steps WHERE run_id = ? ORDER BY id');
   const upsertProject = db.prepare(`INSERT INTO projects (name, alias, group_name) VALUES (?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET alias = excluded.alias, group_name = excluded.group_name`);
   const selectProjects = db.prepare('SELECT * FROM projects');
@@ -101,6 +113,9 @@ function openDb(file) {
     },
     getRun: (runId) => selectRun.get(runId),
     getLogs: (runId) => selectLogs.all(runId).map((row) => row.text),
+    startStep: (runId, name) => Number(insertStep.run(runId, name, now()).lastInsertRowid),
+    finishStep: (stepId) => { updateStep.run(now(), stepId); },
+    getSteps: (runId) => selectSteps.all(runId),
     listProjectSettings: () => selectProjects.all(),
     getProjectSettings: (name) => selectProject.get(name),
     // All or nothing, so a failed save never leaves the form half applied.
