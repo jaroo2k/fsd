@@ -34,7 +34,7 @@ h2{margin:0 0 .85rem;font-size:1.05rem}
 .gnb nav a:hover{text-decoration:none;color:var(--text)}
 .gnb nav a[aria-current]{color:var(--accent);border-bottom-color:var(--accent)}
 .brand{margin-bottom:1.75rem}
-.brand p{margin:.1rem 0 0;color:var(--muted);font-size:.95rem}
+.brand p,.title p{margin:.1rem 0 0;color:var(--muted);font-size:.95rem}
 .mark{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:.8rem;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;box-shadow:var(--shadow);padding:1.25rem;margin-bottom:1.25rem}
 #f{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:1rem;align-items:end}
@@ -124,7 +124,7 @@ const historyPage = (projects) => `<!doctype html><html lang="ko"><meta charset=
 ${style}
 ${gnb('history')}
 <main>
-<header class="title"><h1>업무 내역</h1></header>
+<header class="title"><h1>업무 내역</h1><p>지금까지 실행한 업무를 검색하고 상태와 결과를 확인합니다.</p></header>
 <section class="card">
 <form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
 <label>프로젝트<select name="project">${projectOptions(projects, '전체')}</select></label>
@@ -295,7 +295,7 @@ const projectsPage = ({ rows, groups }) => `<!doctype html><html lang="ko"><meta
 ${style}
 ${gnb('projects')}
 <main>
-<header class="title"><h1>프로젝트 관리</h1></header>
+<header class="title"><h1>프로젝트 관리</h1><p>프로젝트 폴더에 별칭과 그룹을 지정해 업무 실행과 내역에서 쉽게 구분합니다.</p></header>
 <section class="card"><h2>그룹</h2>
 <form id="group-form"><label>새 그룹<input name="name" maxlength="50" required></label><button>추가</button></form>
 <p id="groups-note" class="note" role="status"></p>
@@ -390,7 +390,7 @@ ${style}
 ${gnb('history')}
 <main>
 <a class="back" href="/">← 업무 내역</a>
-<header class="title"><h1>${escapeHtml(run.title)}</h1><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></header>
+<header class="title"><h1>${escapeHtml(run.title)}</h1><p>이 업무의 진행 상태, 작업 정보와 실행 로그를 확인합니다.</p><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></header>
 <nav class="views" aria-label="보기 방식">${timeline
     ? `<a href="/runs/${run.id}">간단히</a><a href="?view=time" aria-current="page">자세히</a>`
     : `<a href="/runs/${run.id}" aria-current="page">간단히</a><a href="?view=time">자세히</a>`}</nav>
