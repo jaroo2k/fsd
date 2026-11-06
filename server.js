@@ -197,7 +197,7 @@ ${gnb('history')}
 <label>프로젝트<select name="project">${projectOptions(projects, '전체')}</select></label>
 <label>날짜<input name="date" type="date"></label>
 <button>검색</button><button type="reset" class="secondary">초기화</button></form>
-<table class="runs"><thead><tr><th>제목</th><th>프로젝트</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
+<table class="runs"><thead><tr><th>제목</th><th>프로젝트</th><th>Agent</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
 <p id="runs-note" role="status"></p>
 <nav id="pager" aria-label="업무 내역 페이지" hidden><button id="prev" type="button" class="secondary">이전</button><span id="page-info"></span><button id="next" type="button" class="secondary">다음</button></nav></section>
 </main>
@@ -252,7 +252,7 @@ async function loadRuns() {
       badge.className = 'badge ' + r.status;
       badge.textContent = r.statusLabel;
       const row = document.createElement('tr');
-      for (const content of [link, (r.alias || r.project) + ' · ' + r.agentLabel, badge, new Date(r.started_at).toLocaleString()]) {
+      for (const content of [link, r.alias || r.project, r.agentLabel, badge, new Date(r.started_at).toLocaleString()]) {
         row.insertCell().append(content);
       }
       return row;
@@ -291,7 +291,7 @@ ${gnb('execute')}
 <div class="workspace">
 <section class="card request"><h2>새 업무 설정</h2>
 <form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
-<label>실행 AI<select name="agent">${Object.entries(AGENTS).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label>
+<label>실행 Agent<select name="agent">${Object.entries(AGENTS).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label>
 <label class="url">노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..."></label>
 <label class="task">업무 내용 추가<textarea name="task" rows="4" maxlength="${MAX_TASK_LENGTH}" aria-describedby="task-hint" placeholder="예: 주문 목록에 검색 기능 추가"></textarea>
 <span class="hint" id="task-hint">노션 링크가 없으면 이 내용으로 개발합니다. 둘 다 입력하면 노션 문서의 지시에 더해 반영합니다.</span></label>
@@ -539,7 +539,7 @@ ${gnb('history')}
 ${timeline ? timelineSection(run, timeline) : ''}
 <section class="card"><table class="meta">
 <tr><th>프로젝트</th><td>${escapeHtml(alias ? `${alias} (${run.project})` : run.project)}</td></tr>
-<tr><th>실행 AI</th><td>${escapeHtml(run.agentLabel)}</td></tr>
+<tr><th>실행 Agent</th><td>${escapeHtml(run.agentLabel)}</td></tr>
 <tr><th>브랜치</th><td>${escapeHtml(run.branch || '-')}</td></tr>
 <tr><th>노션 문서</th><td>${run.url ? `<a href="${escapeHtml(run.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.url)}</a>` : '-'}</td></tr>
 ${run.task ? `<tr><th>업무 내용</th><td><div class="task-text">${escapeHtml(run.task)}</div></td></tr>` : ''}

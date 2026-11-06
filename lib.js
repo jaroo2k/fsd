@@ -82,7 +82,7 @@ const AGENTS = { claude: 'Claude', codex: 'Codex' };
 
 function parseRunRequest(input) {
   const agent = input?.agent ?? 'claude';
-  if (!Object.hasOwn(AGENTS, agent)) return { error: '실행 AI는 Claude나 Codex만 고를 수 있습니다.' };
+  if (!Object.hasOwn(AGENTS, agent)) return { error: '실행 Agent는 Claude나 Codex만 고를 수 있습니다.' };
   const rawUrl = typeof input?.url === 'string' ? input.url.trim() : '';
   const task = typeof input?.task === 'string' ? input.task.trim() : '';
   if (!rawUrl && !task) return { error: '노션 링크나 업무 내용을 입력해 주세요.' };
