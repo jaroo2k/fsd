@@ -337,7 +337,9 @@ function parseRunFilter(params) {
   const to = params.get('to') || '';
   if ((from && !ISO_TIME.test(from)) || (to && !ISO_TIME.test(to))) return null;
   const page = Number.parseInt(params.get('page'), 10);
-  return { q: (params.get('q') || '').trim(), project: params.get('project') || '', from, to, page: page > 0 ? page : 1 };
+  const pageSize = Number(params.get('pageSize'));
+  return { q: (params.get('q') || '').trim(), project: params.get('project') || '', from, to, page: page > 0 ? page : 1,
+    pageSize: [10, 20, 50, 100].includes(pageSize) ? pageSize : 20 };
 }
 
 module.exports = {

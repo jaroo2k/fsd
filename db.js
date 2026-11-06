@@ -115,13 +115,14 @@ function openDb(file) {
     finishRun: (runId, status) => { updateRun.run(status, now(), runId); },
     setSummary: (runId, summary) => { updateSummary.run(summary, runId); },
     // A page past the end (runs can shrink under a filter) shows the last page instead of nothing.
-    listRuns: ({ q = '', project = '', from = '', to = '', page = 1 } = {}) => {
+    listRuns: ({ q = '', project = '', from = '', to = '', page = 1, pageSize = PAGE_SIZE } = {}) => {
+      if (![10, 20, 50, 100].includes(pageSize)) pageSize = PAGE_SIZE;
       const filter = { q, project, from, to };
       const { total } = countRuns.get(filter);
-      const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      const lastPage = Math.max(1, Math.ceil(total / pageSize));
       const current = Math.min(page, lastPage);
-      const runs = selectRuns.all({ ...filter, limit: PAGE_SIZE, offset: (current - 1) * PAGE_SIZE });
-      return { runs, total, page: current, pageSize: PAGE_SIZE };
+      const runs = selectRuns.all({ ...filter, limit: pageSize, offset: (current - 1) * pageSize });
+      return { runs, total, page: current, pageSize };
     },
     getRun: (runId) => selectRun.get(runId),
     getLogs: (runId) => selectLogs.all(runId).map((row) => row.text),

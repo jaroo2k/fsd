@@ -90,6 +90,8 @@ th{color:var(--muted);font-size:.8rem;font-weight:600}
 button.secondary{color:var(--text);background:transparent;border:1px solid var(--border)}
 button.secondary:hover:not(:disabled){background:var(--border)}
 button:disabled{opacity:.45;cursor:default}
+#list-size{display:flex;align-items:center;justify-content:flex-end;gap:.75rem;margin-bottom:.75rem}
+#list-size select{width:auto;margin:0}
 #pager{display:flex;align-items:center;justify-content:center;gap:.9rem;margin-top:.9rem;color:var(--muted);font-size:.925rem}
 #pager[hidden]{display:none}#pager button{width:auto}
 .back{display:inline-block;margin-bottom:1rem;font-size:.925rem}
@@ -203,6 +205,7 @@ ${gnb('history')}
 <label>프로젝트<select name="project">${projectOptions(projects, '전체')}</select></label>
 <label>날짜<input name="date" type="date"></label>
 <button>검색</button><button type="reset" class="secondary">초기화</button></form>
+<label id="list-size">페이지당 표시 개수<select id="page-size"><option value="10">10개</option><option value="20" selected>20개</option><option value="50">50개</option><option value="100">100개</option></select></label>
 <table class="runs"><thead><tr><th>제목</th><th>프로젝트</th><th>Agent</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
 <p id="runs-note" role="status"></p>
 <nav id="pager" aria-label="업무 내역 페이지" hidden><button id="prev" type="button" class="secondary">이전</button><span id="page-info"></span><button id="next" type="button" class="secondary">다음</button></nav></section>
@@ -215,6 +218,7 @@ const pager = document.getElementById('pager');
 const prev = document.getElementById('prev');
 const next = document.getElementById('next');
 const pageInfo = document.getElementById('page-info');
+const pageSizeSelect = document.getElementById('page-size');
 let currentPage = 1;
 let filter = new URLSearchParams();
 let latestLoad = 0;
@@ -238,6 +242,7 @@ async function loadRuns() {
   try {
     const params = new URLSearchParams(filter);
     params.set('page', currentPage);
+    params.set('pageSize', pageSizeSelect.value);
     const res = await fetch('/runs?' + params);
     if (!res.ok) throw new Error();
     const { runs, total, page, pageSize } = await res.json();
@@ -279,6 +284,7 @@ searchForm.onreset = () => {
   currentPage = 1;
   loadRuns();
 };
+pageSizeSelect.onchange = () => { currentPage = 1; loadRuns(); };
 prev.onclick = () => { currentPage -= 1; loadRuns(); };
 next.onclick = () => { currentPage += 1; loadRuns(); };
 // The list only follows run changes; log lines are for the 업무 실행 page.
