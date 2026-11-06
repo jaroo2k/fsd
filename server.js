@@ -214,7 +214,8 @@ async function loadTimeline() {
       if (list) list.scrollTop = atEnd ? list.scrollHeight : top;
     }
   } catch { /* the next log line or poll tries again */ }
-  if (timelineEl.querySelector('.bar.active')) scheduleTimeline(2000);
+  // Scoped to the list: the legend also has an active swatch.
+  if (timelineEl.querySelector('.timeline .bar.active')) scheduleTimeline(2000);
 }
 const es = new EventSource('/events');
 es.onopen = () => { log.textContent = ''; loadRuns(); loadTimeline(); };
