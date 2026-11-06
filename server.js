@@ -7,6 +7,14 @@ const {
 } = require('./lib');
 const { openDb } = require('./db');
 
+// Dark palette, applied by the OS setting unless the user picked a theme with the GNB toggle.
+const darkVars = `--bg:#0e1420;--surface:#162033;--border:#25324a;--field-border:#2c3a55;--text:#e3e9f5;--muted:#9aa7bf;
+--accent:#8fb0ff;--accent-hover:#b3c9ff;--accent-soft:#1e2c4d;--on-accent:#0f1a33;--field:#111a2b;--ok:#7fd8a8;--err:#fca5a5;
+--running-bg:#3b3115;--running:#f2d27a;--success-bg:#143524;--success:#7fd8a8;--failed-bg:#451c1c;--failed:#fca5a5;
+--interrupted-bg:#232d40;--interrupted:#b6c0d3;--shadow:none;
+--log-bg:#111a2b;--log-text:#c3cde0;--log-empty:#7d8aa3;
+--track:#22304a;--bar-active:#f2c94c;--bar-done:#5cc794;--bar-failed:#f87171;--bar-stopped:#6b7790`;
+
 const style = `<style>
 :root{color-scheme:light dark;--bg:#f3f6fb;--surface:#fff;--border:#e0e7f0;--field-border:#dce3ef;--text:#263550;--muted:#66748c;
 --accent:#345fc7;--accent-hover:#2a4fa8;--accent-soft:#e5edff;--on-accent:#fff;--field:#fbfcff;--ok:#1f7a4f;--err:#b42318;
@@ -14,12 +22,8 @@ const style = `<style>
 --interrupted-bg:#eef1f6;--interrupted:#5a667c;--shadow:0 5px 20px rgb(37 76 128 / .05);
 --log-bg:#fbfcff;--log-text:#4b5b78;--log-empty:#8a97ad;
 --track:#edf1f8;--bar-active:#edbd38;--bar-done:#43a876;--bar-failed:#d9534f;--bar-stopped:#a3adbf}
-@media (prefers-color-scheme:dark){:root{--bg:#0e1420;--surface:#162033;--border:#25324a;--field-border:#2c3a55;--text:#e3e9f5;--muted:#9aa7bf;
---accent:#8fb0ff;--accent-hover:#b3c9ff;--accent-soft:#1e2c4d;--on-accent:#0f1a33;--field:#111a2b;--ok:#7fd8a8;--err:#fca5a5;
---running-bg:#3b3115;--running:#f2d27a;--success-bg:#143524;--success:#7fd8a8;--failed-bg:#451c1c;--failed:#fca5a5;
---interrupted-bg:#232d40;--interrupted:#b6c0d3;--shadow:none;
---log-bg:#111a2b;--log-text:#c3cde0;--log-empty:#7d8aa3;
---track:#22304a;--bar-active:#f2c94c;--bar-done:#5cc794;--bar-failed:#f87171;--bar-stopped:#6b7790}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;${darkVars}}}
+:root[data-theme=dark]{color-scheme:dark;${darkVars}}:root[data-theme=light]{color-scheme:light}
 *{box-sizing:border-box}
 html{font-size:14px}
 body{margin:0;background:var(--bg);color:var(--text);word-break:keep-all;
@@ -37,6 +41,8 @@ h2{margin:0 0 1.25rem;font-size:1.05rem;letter-spacing:-.02em}
 .gnb nav a{display:flex;align-items:center;padding:0 .25rem;border-bottom:3px solid transparent;color:var(--muted);font-size:.925rem;font-weight:600;white-space:nowrap}
 .gnb nav a:hover{text-decoration:none;color:var(--text)}
 .gnb nav a[aria-current]{color:var(--accent);border-bottom-color:var(--accent)}
+.gnb .theme-toggle{flex:none;width:2.4rem;height:2.4rem;margin-left:auto;padding:0;display:grid;place-items:center;color:var(--text);background:transparent;border:1px solid var(--border);border-radius:8px;font-size:1.1rem;line-height:1}
+.gnb .theme-toggle:hover{background:var(--accent-soft)}
 .brand,.title{margin-bottom:1.75rem}
 .brand p,.title p{margin:.5rem 0 0;color:var(--muted);font-size:.9rem;line-height:1.7}
 .mark{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:.8rem;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem}
@@ -139,17 +145,45 @@ button.link{height:auto;padding:0;background:none;color:var(--accent);font-size:
 @media (max-width:640px){main{padding:1.5rem 1rem 3rem}.card{padding:1.25rem}h1{font-size:1.6rem}#search,#group-form{grid-template-columns:minmax(0,1fr)}button{width:100%}.submit{flex-direction:column-reverse;align-items:stretch}
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child,.runs td:nth-child(2){grid-column:1/-1}.runs td:nth-child(2){color:var(--muted);font-size:.9rem}
-.gnb-inner{gap:.75rem;height:3.75rem;padding:0 .75rem}.gnb-brand span.name{display:none}.gnb nav{gap:0;margin-left:auto}.gnb nav a{padding:0 .6rem}
+.gnb-inner{gap:.75rem;height:3.75rem;padding:0 .75rem}.gnb-brand span.name{display:none}.gnb nav{gap:0;margin-left:auto}.gnb nav a{padding:0 .6rem}.gnb .theme-toggle{width:2.4rem;margin-left:0}
 .projects thead{display:none}.projects tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .projects tr:last-child{border-bottom:0}.projects td{padding:0;border:0}.projects td:first-child{grid-column:1/-1;font-weight:600}
 .timeline li{grid-template-columns:minmax(0,1fr) auto;gap:.3rem .75rem}.timeline .track{grid-column:1/-1;grid-row:2}}
-</style>`;
+</style>
+<script>
+(() => {
+  // Apply the saved theme before the page paints to avoid a flash of the wrong colors.
+  try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+})();
+</script>`;
 
 // Global navigation shown on every page; `current` marks the active menu.
 const gnb = (current) => {
   const item = (key, href, label) => `<a href="${href}"${current === key ? ' aria-current="page"' : ''}>${label}</a>`;
   return `<header class="gnb"><div class="gnb-inner"><a class="gnb-brand" href="/"><span class="mark" aria-hidden="true">N</span><span class="name">노션 개발 러너</span></a>
-<nav aria-label="주 메뉴">${item('history', '/', '업무 내역')}${item('execute', '/execute', '업무 실행')}${item('projects', '/projects', '프로젝트 관리')}</nav></div></header>`;
+<nav aria-label="주 메뉴">${item('history', '/', '업무 내역')}${item('execute', '/execute', '업무 실행')}${item('projects', '/projects', '프로젝트 관리')}</nav>
+<button type="button" class="theme-toggle" id="theme-toggle" aria-label="다크 모드로 변경"></button></div></header>
+<script>
+(() => {
+  // Light/dark toggle: remembers the choice; without one, follows the OS setting.
+  const btn = document.getElementById('theme-toggle');
+  const media = matchMedia('(prefers-color-scheme: dark)');
+  const current = () => document.documentElement.dataset.theme || (media.matches ? 'dark' : 'light');
+  const render = () => {
+    const dark = current() === 'dark';
+    btn.textContent = dark ? '☀' : '☾';
+    btn.title = btn.ariaLabel = dark ? '라이트 모드로 변경' : '다크 모드로 변경';
+  };
+  btn.addEventListener('click', () => {
+    const next = current() === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('theme', next); } catch {}
+    render();
+  });
+  media.addEventListener('change', render);
+  render();
+})();
+</script>`;
 };
 
 // 업무 내역 (main page): searchable list of past runs, refreshed when a run starts or ends.
