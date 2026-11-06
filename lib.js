@@ -182,7 +182,7 @@ function groupLog(entries) {
     else out.push(`[도구] ${group.label} ×${group.count}`, ...group.details.map((d) => `  - ${d}`));
     group = null;
   };
-  for (const line of entries.join('\n').split('\n')) {
+  for (const line of entries.flatMap((entry) => entry.split('\n'))) {
     const m = /^\[도구\] (.+?)(?:: (.*))?$/.exec(line);
     if (m && group && group.label === m[1]) {
       group.count += 1;

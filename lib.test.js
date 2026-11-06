@@ -140,7 +140,10 @@ test('tool calls are timed and shown as bars in the detailed view', async () => 
   assert.match(timeline, /<li><span class="name">Read&#60;x&#62;<\/span><span class="track"><span class="bar done"/);
   assert.match(timeline, /<span class="name">명령 실행<\/span><span class="track"><span class="bar stopped"/, 'a call with no result is not shown as done');
   assert.match(timeline, /class="total"><span class="name">전체<\/span><span class="track"><span class="bar done"/);
-  for (const hidden of ['secret.txt', 'top secret', 'echo hidden']) assert.ok(!timeline.includes(hidden), `${hidden} is not shown`);
+  const bars = timeline.slice(timeline.indexOf('<ol class="timeline">'), timeline.indexOf('</ol>'));
+  assert.ok(bars && !bars.includes('echo hidden'), 'bars show tool names only');
+  assert.ok(timeline.includes('[도구] 명령 실행: echo hidden'), 'the log says what a command was for');
+  for (const hidden of ['secret.txt', 'top secret']) assert.ok(!timeline.includes(hidden), `${hidden} is not shown`);
   assert.ok(live.includes('<span class="name">Read&#60;x&#62;</span>'), 'home page fragment shows the same bars');
   assert.ok(live.includes(`href="/runs/${runs[0].id}?view=time"`), 'home page fragment links to the run');
   assert.ok(!live.includes('<html'), 'home page gets a fragment, not a page');
@@ -151,7 +154,7 @@ test('home page has a live timeline that is empty before any run', async () => {
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.address().port}`;
   try {
-    assert.ok((await (await fetch(base)).text()).includes('id="timeline"'));
+    assert.ok((await (await fetch(`${base}/execute`)).text()).includes('id="timeline"'));
     const res = await fetch(`${base}/timeline`);
     assert.strictEqual(res.status, 200);
     assert.strictEqual(await res.text(), '');
@@ -188,8 +191,8 @@ test('step bars run until the next step starts, so they add up to the total', ()
 test('tool names are shown in plain Korean in the live log', () => {
   const { formatEvent, toolLabel } = require('./lib');
   const tool = (name) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input: { command: 'secret' } }] } });
-  assert.strictEqual(formatEvent(tool('Bash')), '[도구] 명령 실행');
-  assert.strictEqual(formatEvent(tool('mcp__notion__API-patch-block-children')), '[도구] 노션 페이지에 내용 추가');
+  assert.strictEqual(formatEvent(tool('Bash')), '[도구] 명령 실행: secret');
+  assert.strictEqual(formatEvent(tool('mcp__notion__API-patch-block-children')), '[도구] 노션 페이지에 내용 추가', 'only commands show their input');
   assert.strictEqual(toolLabel('mcp__notion__API-new-thing'), '노션 작업');
   assert.strictEqual(toolLabel('mcp__my_db__query'), 'my_db 연결 기능 (query)');
   assert.strictEqual(toolLabel('Unknown'), 'Unknown');
@@ -197,6 +200,30 @@ test('tool names are shown in plain Korean in the live log', () => {
   assert.strictEqual(formatEvent(JSON.stringify({ type: 'system', subtype: 'init', tools: ['Bash'] })), '작업 환경을 준비했습니다.');
   assert.strictEqual(formatEvent(JSON.stringify({ type: 'system', subtype: 'other' })), null);
   assert.strictEqual(formatEvent('plain text'), 'plain text');
+});
+
+test('a command shows its description, or only its first line, cut short', () => {
+  const { formatEvent } = require('./lib');
+  const bash = (input) => formatEvent(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input }] } }));
+  assert.strictEqual(bash({ command: 'git status', description: '  작업 폴더 상태 확인 ' }), '[도구] 명령 실행: 작업 폴더 상태 확인');
+  assert.strictEqual(bash({ command: 'cat <<EOF\nline two\nEOF' }), '[도구] 명령 실행: cat <<EOF …', 'later lines are hidden');
+  assert.strictEqual(bash({ command: 'x'.repeat(100) }), `[도구] 명령 실행: ${'x'.repeat(80)}…`);
+  for (const input of [undefined, null, 'text', {}, { command: 5 }]) assert.strictEqual(bash(input), '[도구] 명령 실행');
+});
+
+test('back-to-back calls of the same tool are grouped in the log', () => {
+  const { groupLog } = require('./lib');
+  assert.deepStrictEqual(groupLog([
+    '시작: a (b)', '[도구] 파일 읽기', '[도구] 파일 읽기', '[도구] 명령 실행: 상태 확인', '[도구] 명령 실행: 테스트 실행',
+    '설명\n[도구] 명령 실행', '[도구] 명령 실행: 하나',
+  ]), [
+    '시작: a (b)', '[도구] 파일 읽기 ×2', '[도구] 명령 실행 ×2', '  - 상태 확인', '  - 테스트 실행',
+    '설명', '[도구] 명령 실행 ×2', '  - 하나',
+  ]);
+  assert.deepStrictEqual(groupLog(['[도구] 명령 실행: 한 번']), ['[도구] 명령 실행: 한 번']);
+  assert.deepStrictEqual(groupLog([]), []);
+  // The execute page runs this function's source as is in the browser, so it must not depend on anything outside it.
+  assert.deepStrictEqual(new Function(`return (${groupLog.toString()})`)()(['[도구] x', '[도구] x']), ['[도구] x ×2']);
 });
 
 test('timeline bars stay inside the run and show live state', () => {
@@ -705,7 +732,8 @@ test('run list shows the project alias and filters by project', async () => {
     const html = await (await fetch(t.base)).text();
     assert.ok(html.includes('<th>프로젝트</th>'));
     assert.ok(html.includes('<select name="project"><option value="">전체</option>'));
-    assert.ok(html.includes('<select name="project" required><option value="">선택하세요</option>'));
+    const execute = await (await fetch(`${t.base}/execute`)).text();
+    assert.ok(execute.includes('<select name="project" required><option value="">선택하세요</option>'));
   } finally {
     t.close();
   }
@@ -737,7 +765,7 @@ test('a run can start from the task text alone and shows it on the detail page',
   const t = await queueApp();
   const post = (body) => fetch(`${t.base}/run`, { method: 'POST', headers: { Origin: t.base }, body: JSON.stringify(body) });
   try {
-    const home = await (await fetch(t.base)).text();
+    const home = await (await fetch(`${t.base}/execute`)).text();
     assert.ok(home.includes('<textarea name="task"') && !/name="url"[^>]*required/.test(home), 'the link is optional');
     assert.ok(home.indexOf('name="url"') < home.indexOf('name="task"'), 'the task box sits below the link');
     assert.strictEqual((await post({ project: 'a', url: '', task: '' })).status, 400);
