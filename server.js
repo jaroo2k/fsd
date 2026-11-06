@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog,
 } = require('./lib');
 const { openDb } = require('./db');
 
@@ -255,14 +255,19 @@ async function loadTimeline() {
   if (timelineEl.querySelector('.timeline .bar.active')) scheduleTimeline(2000);
 }
 const es = new EventSource('/events');
-es.onopen = () => { log.textContent = ''; loadTimeline(); };
+// Same grouping as the detail page, so the whole log is redrawn as lines arrive.
+${groupLog.toString()}
+let lines = [];
+const showLog = () => { log.textContent = lines.length ? groupLog(lines).join('\\n') + '\\n' : ''; };
+es.onopen = () => { lines = []; showLog(); loadTimeline(); };
 es.addEventListener('runs', () => scheduleTimeline(100));
 const status = document.getElementById('status');
 es.onmessage = (e) => {
   scheduleTimeline(300);
   const text = JSON.parse(e.data);
-  if (text.startsWith('시작: ')) log.textContent = '';
-  log.textContent += text + '\\n';
+  if (text.startsWith('시작: ')) lines = [];
+  lines.push(text);
+  showLog();
   log.scrollTop = log.scrollHeight;
 };
 const runForm = document.getElementById('f');
@@ -398,7 +403,7 @@ ${run.task ? `<tr><th>업무 내용</th><td><div class="task-text">${escapeHtml(
 <tr><th>시작</th><td><time datetime="${escapeHtml(run.started_at)}">${escapeHtml(run.started_at)}</time></td></tr>
 <tr><th>종료</th><td>${run.finished_at ? `<time datetime="${escapeHtml(run.finished_at)}">${escapeHtml(run.finished_at)}</time>` : '-'}</td></tr>
 </table></section>
-<section class="card"><h2>작업 내용</h2><pre>${escapeHtml(logs.join('\n'))}</pre></section>
+<section class="card"><h2>작업 내용</h2><pre>${escapeHtml(groupLog(logs).join('\n'))}</pre></section>
 </main>
 <script>
 for (const t of document.querySelectorAll('time')) t.textContent = new Date(t.dateTime).toLocaleString();

@@ -141,17 +141,60 @@ function toolLabel(name) {
 
 const SYSTEM_LABELS = { init: '작업 환경을 준비했습니다.', compact_boundary: '대화가 길어져 앞부분을 요약했습니다.' };
 
-// Tool names only: tool input/output could contain secrets.
+const DETAIL_MAX = 80;
+
+// Only what a command was run for: Claude's own description when it gave one, otherwise the command's first line.
+// Other tool input and all output stay hidden, since they could contain secrets.
+function toolDetail(c) {
+  if (c.name !== 'Bash' || !c.input || typeof c.input !== 'object') return '';
+  const { description, command } = c.input;
+  const text = (typeof description === 'string' && description.trim()) || (typeof command === 'string' ? command.trim() : '');
+  const [first = '', ...rest] = text.split('\n');
+  const line = first.trim();
+  return line.length > DETAIL_MAX ? `${line.slice(0, DETAIL_MAX)}…` : rest.length ? `${line} …` : line;
+}
+
 function formatEvent(line) {
   let e;
   try { e = JSON.parse(line); } catch { return line; }
   if (e.type === 'assistant') {
     return (e.message?.content || [])
-      .map((c) => (c.type === 'text' ? c.text : c.type === 'tool_use' ? `[도구] ${toolLabel(c.name)}` : ''))
+      .map((c) => {
+        if (c.type === 'text') return c.text;
+        if (c.type !== 'tool_use') return '';
+        const detail = toolDetail(c);
+        return `[도구] ${toolLabel(c.name)}${detail ? `: ${detail}` : ''}`;
+      })
       .filter(Boolean).join('\n') || null;
   }
   if (e.type === 'system' && Object.hasOwn(SYSTEM_LABELS, e.subtype)) return SYSTEM_LABELS[e.subtype];
   return null;
+}
+
+// Back-to-back calls of the same tool become one line with a count and what each call did. Any other line in
+// between starts a new group. Self-contained, because the 업무 실행 page runs this same source in the browser.
+function groupLog(entries) {
+  const out = [];
+  let group = null;
+  const flush = () => {
+    if (!group) return;
+    if (group.count === 1) out.push(`[도구] ${group.label}${group.details.length ? `: ${group.details[0]}` : ''}`);
+    else out.push(`[도구] ${group.label} ×${group.count}`, ...group.details.map((d) => `  - ${d}`));
+    group = null;
+  };
+  for (const line of entries.join('\n').split('\n')) {
+    const m = /^\[도구\] (.+?)(?:: (.*))?$/.exec(line);
+    if (m && group && group.label === m[1]) {
+      group.count += 1;
+      if (m[2]) group.details.push(m[2]);
+      continue;
+    }
+    flush();
+    if (m) group = { label: m[1], details: m[2] ? [m[2]] : [], count: 1 };
+    else out.push(line);
+  }
+  flush();
+  return out;
 }
 
 const STATUS_LABELS = { queued: '대기 중', running: '실행 중', success: '완료', failed: '실패', interrupted: '중단됨' };
@@ -221,5 +264,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel, groupLog,
 };
