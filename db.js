@@ -1,8 +1,10 @@
 const { DatabaseSync } = require('node:sqlite');
 
 const PAGE_SIZE = 20;
-const TITLE = "COALESCE(summary, project || ' · ' || branch)";
+// A queued run has no branch yet.
+const TITLE = "COALESCE(summary, project || COALESCE(' · ' || NULLIF(branch, ''), ''))";
 const FILTER = `WHERE (:q = '' OR instr(lower(${TITLE}), lower(:q)) > 0)
+  AND (:project = '' OR project = :project)
   AND (:from = '' OR started_at >= :from) AND (:to = '' OR started_at < :to)`;
 
 function openDb(file) {
@@ -23,6 +25,15 @@ function openDb(file) {
       text TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS run_logs_run_id ON run_logs(run_id);
+    -- Tool name only: inputs and results can hold secrets.
+    CREATE TABLE IF NOT EXISTS run_steps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL REFERENCES runs(id),
+      name TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS run_steps_run_id ON run_steps(run_id);
     CREATE TABLE IF NOT EXISTS projects (
       name TEXT PRIMARY KEY,
       alias TEXT,
@@ -42,18 +53,27 @@ function openDb(file) {
   const now = () => new Date().toISOString();
 
   // A run can't outlive the server that started it, so "running" here means the server died mid-run.
-  db.prepare("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'").run(now());
+  // The queue is gone with it too, and the tree may be left dirty, so waiting runs don't start by themselves.
+  db.prepare("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status IN ('running', 'queued')").run(now());
 
   const insertRun = db.prepare(
     "INSERT INTO runs (project, url, branch, status, started_at) VALUES (?, ?, ?, 'running', ?)",
   );
+  const insertQueued = db.prepare(
+    "INSERT INTO runs (project, url, branch, status, started_at) VALUES (?, ?, '', 'queued', ?)",
+  );
+  const markStarted = db.prepare("UPDATE runs SET status = 'running', branch = ?, started_at = ? WHERE id = ?");
   const insertLog = db.prepare('INSERT INTO run_logs (run_id, text) VALUES (?, ?)');
   const updateRun = db.prepare('UPDATE runs SET status = ?, finished_at = ? WHERE id = ?');
   const updateSummary = db.prepare('UPDATE runs SET summary = ? WHERE id = ?');
   const countRuns = db.prepare(`SELECT COUNT(*) AS total FROM runs ${FILTER}`);
-  const selectRuns = db.prepare(`SELECT *, ${TITLE} AS title FROM runs ${FILTER} ORDER BY id DESC LIMIT :limit OFFSET :offset`);
+  const selectRuns = db.prepare(`SELECT runs.*, ${TITLE} AS title, projects.alias AS alias
+    FROM runs LEFT JOIN projects ON projects.name = runs.project ${FILTER} ORDER BY runs.id DESC LIMIT :limit OFFSET :offset`);
   const selectRun = db.prepare(`SELECT *, ${TITLE} AS title FROM runs WHERE id = ?`);
   const selectLogs = db.prepare('SELECT text FROM run_logs WHERE run_id = ? ORDER BY id');
+  const insertStep = db.prepare('INSERT INTO run_steps (run_id, name, started_at) VALUES (?, ?, ?)');
+  const updateStep = db.prepare('UPDATE run_steps SET finished_at = ? WHERE id = ? AND finished_at IS NULL');
+  const selectSteps = db.prepare('SELECT name, started_at, finished_at FROM run_steps WHERE run_id = ? ORDER BY id');
   const upsertProject = db.prepare(`INSERT INTO projects (name, alias, group_name) VALUES (?, ?, ?)
     ON CONFLICT(name) DO UPDATE SET alias = excluded.alias, group_name = excluded.group_name`);
   const selectProjects = db.prepare('SELECT * FROM projects');
@@ -76,12 +96,15 @@ function openDb(file) {
 
   return {
     createRun: ({ project, url, branch }) => Number(insertRun.run(project, url, branch, now()).lastInsertRowid),
+    // started_at holds the request time until the run really starts.
+    enqueueRun: ({ project, url }) => Number(insertQueued.run(project, url, now()).lastInsertRowid),
+    startRun: (runId, branch) => { markStarted.run(branch, now(), runId); },
     appendLog: (runId, text) => { insertLog.run(runId, text); },
     finishRun: (runId, status) => { updateRun.run(status, now(), runId); },
     setSummary: (runId, summary) => { updateSummary.run(summary, runId); },
     // A page past the end (runs can shrink under a filter) shows the last page instead of nothing.
-    listRuns: ({ q = '', from = '', to = '', page = 1 } = {}) => {
-      const filter = { q, from, to };
+    listRuns: ({ q = '', project = '', from = '', to = '', page = 1 } = {}) => {
+      const filter = { q, project, from, to };
       const { total } = countRuns.get(filter);
       const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
       const current = Math.min(page, lastPage);
@@ -90,6 +113,9 @@ function openDb(file) {
     },
     getRun: (runId) => selectRun.get(runId),
     getLogs: (runId) => selectLogs.all(runId).map((row) => row.text),
+    startStep: (runId, name) => Number(insertStep.run(runId, name, now()).lastInsertRowid),
+    finishStep: (stepId) => { updateStep.run(now(), stepId); },
+    getSteps: (runId) => selectSteps.all(runId),
     listProjectSettings: () => selectProjects.all(),
     getProjectSettings: (name) => selectProject.get(name),
     // All or nothing, so a failed save never leaves the form half applied.
