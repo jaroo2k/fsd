@@ -75,6 +75,30 @@ function parseNotionUrl(value) {
   return ok ? url.href : null;
 }
 
+const MAX_TASK_LENGTH = 10000;
+
+// A run needs a notion link, a task description, or both. Returns { url, task } or { error }.
+function parseRunRequest(input) {
+  const rawUrl = typeof input?.url === 'string' ? input.url.trim() : '';
+  const task = typeof input?.task === 'string' ? input.task.trim() : '';
+  if (!rawUrl && !task) return { error: '노션 링크나 업무 내용을 입력해 주세요.' };
+  const url = rawUrl ? parseNotionUrl(rawUrl) : '';
+  if (url === null) return { error: '노션 링크가 아닙니다.' };
+  if (task.length > MAX_TASK_LENGTH) return { error: `업무 내용은 ${MAX_TASK_LENGTH}자 이내로 입력해 주세요.` };
+  return { url, task };
+}
+
+// One pass, so a task that happens to contain "{{BRANCH}}" is not filled in again.
+const fillTemplate = (template, values) => template.replace(/\{\{(URL|BRANCH|TASK)\}\}/g, (_, key) => values[key]);
+
+// Without a link the task template is used; with both, the task is added after the notion instructions.
+function buildPrompt({ notionTemplate, taskTemplate, url, task, branch }) {
+  const values = { URL: url, BRANCH: branch, TASK: task };
+  if (!url) return fillTemplate(taskTemplate, values);
+  const prompt = fillTemplate(notionTemplate, values);
+  return task ? `${prompt.trimEnd()}\n\n추가 업무 내용 (노션 페이지의 지시와 함께 수행합니다):\n${task}\n` : prompt;
+}
+
 // Host blocks DNS rebinding; Origin blocks other websites posting to localhost.
 function isLocalRequest(headers, port, requireOrigin) {
   const hosts = [`127.0.0.1:${port}`, `localhost:${port}`];
@@ -158,5 +182,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView,
 };

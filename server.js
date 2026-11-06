@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const {
-  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView,
+  listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView,
 } = require('./lib');
 const { openDb } = require('./db');
 
@@ -31,10 +31,14 @@ h2{margin:0 0 .85rem;font-size:1.05rem}
 .mark{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:.8rem;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;box-shadow:var(--shadow);padding:1.25rem;margin-bottom:1.25rem}
 #f{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:1rem;align-items:end}
+#f .url{grid-column:2/-1}#f .task{grid-column:1/3}
+textarea{display:block;width:100%;min-height:6rem;margin-top:.4rem;padding:.6rem .8rem;font:inherit;font-weight:400;line-height:1.5;color:inherit;background:var(--field);border:1px solid var(--border);border-radius:.6rem;resize:vertical}
+.hint{display:block;margin-top:.35rem;color:var(--muted);font-size:.8rem;font-weight:400}
+.task-text{white-space:pre-wrap;overflow-wrap:anywhere}
 label{display:block;font-size:.875rem;font-weight:600}
 input,select{display:block;width:100%;height:2.75rem;margin-top:.4rem;padding:0 .8rem;font:inherit;font-weight:400;color:inherit;background:var(--field);border:1px solid var(--border);border-radius:.6rem}
 summary{cursor:pointer;border-radius:.3rem}summary h2{display:inline;margin:0}details[open]>summary{margin-bottom:.85rem}
-input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button{height:2.75rem;padding:0 1.5rem;font:inherit;font-weight:600;color:var(--on-accent);background:var(--accent);border:0;border-radius:.6rem;cursor:pointer;transition:background .15s}
 button:hover{background:var(--accent-hover)}
 #status{margin:.9rem 0 0;font-size:.925rem;font-weight:600}#status:empty{display:none}
@@ -91,7 +95,7 @@ pre:empty::before{content:"표시할 로그가 없습니다.";color:#8a93a3}
 .muted{margin:.75rem 0 0;color:var(--muted);font-size:.925rem}
 #timeline:empty{display:none}#timeline .timeline{max-height:40vh}#timeline h2 a{font-weight:400}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-@media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f,#search,#group-form{grid-template-columns:minmax(0,1fr)}button{width:100%}
+@media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f,#search,#group-form{grid-template-columns:minmax(0,1fr)}#f .url,#f .task{grid-column:auto}button{width:100%}
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child,.runs td:nth-child(2){grid-column:1/-1}.runs td:nth-child(2){color:var(--muted);font-size:.9rem}
 .brand{flex-wrap:wrap}.brand>div{flex:1 1 calc(100% - 3.65rem)}.brand .nav{margin-left:3.65rem}
@@ -107,7 +111,9 @@ ${style}
 <header class="brand"><span class="mark" aria-hidden="true">N</span><div><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></div><a class="nav" href="/projects">프로젝트 관리</a></header>
 <section class="card">
 <form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
-<label>노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..." required></label><button>시작</button></form>
+<label class="url">노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..."></label>
+<label class="task">업무 내용 추가<textarea name="task" rows="4" maxlength="${MAX_TASK_LENGTH}" aria-describedby="task-hint" placeholder="예: 주문 목록에 검색 기능 추가"></textarea>
+<span class="hint" id="task-hint">노션 링크가 없으면 이 내용으로 개발합니다. 둘 다 입력하면 노션 문서의 지시에 더해 반영합니다. Ctrl+Enter로 시작합니다.</span></label><button>시작</button></form>
 <p id="status" role="status"></p>
 </section>
 <div id="timeline"></div>
@@ -228,7 +234,11 @@ es.onmessage = (e) => {
   log.textContent += text + '\\n';
   log.scrollTop = log.scrollHeight;
 };
-document.getElementById('f').onsubmit = async (e) => {
+const runForm = document.getElementById('f');
+runForm.elements.task.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runForm.requestSubmit(); }
+});
+runForm.onsubmit = async (e) => {
   e.preventDefault();
   const body = JSON.stringify(Object.fromEntries(new FormData(e.target)));
   status.className = '';
@@ -351,7 +361,8 @@ ${timeline ? timelineSection(run, timeline) : ''}
 <section class="card"><table class="meta">
 <tr><th>프로젝트</th><td>${escapeHtml(alias ? `${alias} (${run.project})` : run.project)}</td></tr>
 <tr><th>브랜치</th><td>${escapeHtml(run.branch || '-')}</td></tr>
-<tr><th>노션 문서</th><td><a href="${escapeHtml(run.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.url)}</a></td></tr>
+<tr><th>노션 문서</th><td>${run.url ? `<a href="${escapeHtml(run.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(run.url)}</a>` : '-'}</td></tr>
+${run.task ? `<tr><th>업무 내용</th><td><div class="task-text">${escapeHtml(run.task)}</div></td></tr>` : ''}
 <tr><th>시작</th><td><time datetime="${escapeHtml(run.started_at)}">${escapeHtml(run.started_at)}</time></td></tr>
 <tr><th>종료</th><td>${run.finished_at ? `<time datetime="${escapeHtml(run.finished_at)}">${escapeHtml(run.finished_at)}</time>` : '-'}</td></tr>
 </table></section>
@@ -422,17 +433,17 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
       return;
     }
     try {
-      launch(job.runId, job.project, job.url, branch);
+      launch(job.runId, job, branch);
     } catch { /* launch already recorded the failure and moved on */ }
   }
 
-  function launch(runId, project, url, branch) {
+  function launch(runId, { project, url, task }, branch) {
     const cwd = path.join(root, project);
     const say = (text) => {
       record(() => db.appendLog(runId, text));
       emit(text);
     };
-    current = { project, url };
+    current = { project, url, task };
     lastRunId = runId;
     log = [];
     say(`시작: ${project} (${branch})`);
@@ -451,8 +462,10 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     };
     let child;
     try {
-      const prompt = fs.readFileSync(path.join(__dirname, 'prompt.md'), 'utf8')
-        .replaceAll('{{URL}}', () => url).replaceAll('{{BRANCH}}', () => branch);
+      const template = (file) => fs.readFileSync(path.join(__dirname, file), 'utf8');
+      const prompt = buildPrompt({
+        notionTemplate: url ? template('prompt.md') : '', taskTemplate: url ? '' : template('prompt-task.md'), url, task, branch,
+      });
       child = start(prompt, cwd);
     } catch (err) {
       finish('failed', `실패: ${err.message}`);
@@ -490,7 +503,7 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
     child.stderr.setEncoding('utf8').on('data', (t) => say(t.trimEnd()));
     child.on('error', (err) => finish('failed', `실패: ${err.message}`));
     child.on('close', (code) => {
-      if (code === 0 && result && !result.is_error) finish('success', '완료: 브랜치와 노션 문서를 확인하세요.');
+      if (code === 0 && result && !result.is_error) finish('success', url ? '완료: 브랜치와 노션 문서를 확인하세요.' : '완료: 브랜치와 작업 내용의 정리를 확인하세요.');
       else finish('failed', `실패: 종료 코드 ${code}`);
     });
   }
@@ -580,22 +593,25 @@ function createApp({ root, start = runClaude, db = openDb(':memory:') }) {
         return send(500, err.message);
       }
       if (!isValidProject(input?.project, root)) return send(400, '없는 프로젝트입니다.');
-      const url = parseNotionUrl(input.url);
-      if (!url) return send(400, '노션 링크가 아닙니다.');
-      if (start === runClaude && !process.env.NOTION_TOKEN) return send(400, 'NOTION_TOKEN이 설정되지 않았습니다.');
-      // Also what stops a double click from running the same document twice.
-      const same = (job) => job.project === input.project && job.url === url;
-      if ((current && same(current)) || queue.some(same)) return send(409, '같은 문서의 작업이 이미 실행 중이거나 대기 중입니다.');
+      const request = parseRunRequest(input);
+      if (request.error) return send(400, request.error);
+      const { url, task } = request;
+      const job = { project: input.project, url, task };
+      // Only a notion link needs the token; a task-only run never touches notion.
+      if (url && start === runClaude && !process.env.NOTION_TOKEN) return send(400, 'NOTION_TOKEN이 설정되지 않았습니다.');
+      // Also what stops a double click from running the same request twice.
+      const same = (other) => other.project === job.project && other.url === url && other.task === task;
+      if ((current && same(current)) || queue.some(same)) return send(409, '같은 작업이 이미 실행 중이거나 대기 중입니다.');
       try {
         if (current) {
           if (!isRepo(input.project)) return send(400, 'git 저장소가 아닙니다.');
-          const runId = db.enqueueRun({ project: input.project, url });
-          queue.push({ runId, project: input.project, url });
+          const runId = db.enqueueRun(job);
+          queue.push({ runId, ...job });
           notifyRuns();
           return send(202, `대기 중입니다. 앞선 작업이 끝나면 순서대로 시작합니다. (대기 ${queue.length}번째)`);
         }
         const branch = createBranch(input.project);
-        launch(db.createRun({ project: input.project, url, branch }), input.project, url, branch);
+        launch(db.createRun({ ...job, branch }), job, branch);
         return send(202, '시작했습니다.');
       } catch (err) {
         return send(400, err.message);

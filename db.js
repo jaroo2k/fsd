@@ -50,6 +50,10 @@ function openDb(file) {
   if (!db.prepare('PRAGMA table_info(runs)').all().some((column) => column.name === 'summary')) {
     db.exec('ALTER TABLE runs ADD COLUMN summary TEXT');
   }
+  // Task text typed on the home page. Older rows had only a notion link, so they get an empty task.
+  if (!db.prepare('PRAGMA table_info(runs)').all().some((column) => column.name === 'task')) {
+    db.exec("ALTER TABLE runs ADD COLUMN task TEXT NOT NULL DEFAULT ''");
+  }
   const now = () => new Date().toISOString();
 
   // A run can't outlive the server that started it, so "running" here means the server died mid-run.
@@ -57,10 +61,10 @@ function openDb(file) {
   db.prepare("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status IN ('running', 'queued')").run(now());
 
   const insertRun = db.prepare(
-    "INSERT INTO runs (project, url, branch, status, started_at) VALUES (?, ?, ?, 'running', ?)",
+    "INSERT INTO runs (project, url, task, branch, status, started_at) VALUES (?, ?, ?, ?, 'running', ?)",
   );
   const insertQueued = db.prepare(
-    "INSERT INTO runs (project, url, branch, status, started_at) VALUES (?, ?, '', 'queued', ?)",
+    "INSERT INTO runs (project, url, task, branch, status, started_at) VALUES (?, ?, ?, '', 'queued', ?)",
   );
   const markStarted = db.prepare("UPDATE runs SET status = 'running', branch = ?, started_at = ? WHERE id = ?");
   const insertLog = db.prepare('INSERT INTO run_logs (run_id, text) VALUES (?, ?)');
@@ -95,9 +99,10 @@ function openDb(file) {
   };
 
   return {
-    createRun: ({ project, url, branch }) => Number(insertRun.run(project, url, branch, now()).lastInsertRowid),
+    // url is '' for a run started from the task text alone.
+    createRun: ({ project, url, task = '', branch }) => Number(insertRun.run(project, url, task, branch, now()).lastInsertRowid),
     // started_at holds the request time until the run really starts.
-    enqueueRun: ({ project, url }) => Number(insertQueued.run(project, url, now()).lastInsertRowid),
+    enqueueRun: ({ project, url, task = '' }) => Number(insertQueued.run(project, url, task, now()).lastInsertRowid),
     startRun: (runId, branch) => { markStarted.run(branch, now(), runId); },
     appendLog: (runId, text) => { insertLog.run(runId, text); },
     finishRun: (runId, status) => { updateRun.run(status, now(), runId); },

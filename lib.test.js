@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
-const { isValidProject, parseNotionUrl, isLocalRequest, extractSummary, parseRunFilter } = require('./lib');
+const {
+  isValidProject, parseNotionUrl, isLocalRequest, extractSummary, parseRunFilter, parseRunRequest, buildPrompt,
+} = require('./lib');
 const { createApp } = require('./server');
 const { openDb } = require('./db');
 const { DatabaseSync } = require('node:sqlite');
@@ -669,4 +671,71 @@ test('run list shows the project alias and filters by project', async () => {
   } finally {
     t.close();
   }
+});
+
+test('a run needs a notion link, a task, or both', () => {
+  assert.deepStrictEqual(parseRunRequest({ url: 'https://www.notion.so/a' }), { url: 'https://www.notion.so/a', task: '' });
+  assert.deepStrictEqual(parseRunRequest({ url: '', task: '  검색 추가\n' }), { url: '', task: '검색 추가' });
+  assert.deepStrictEqual(parseRunRequest({ url: 'https://www.notion.so/a', task: '더' }), { url: 'https://www.notion.so/a', task: '더' });
+  for (const bad of [{}, null, { url: ' ', task: ' \n' }, { url: 1, task: [] }]) {
+    assert.match(parseRunRequest(bad).error, /노션 링크나 업무 내용/, JSON.stringify(bad));
+  }
+  assert.match(parseRunRequest({ url: 'https://evil.com', task: '일' }).error, /노션 링크가 아닙니다/, 'a bad link is not silently dropped');
+  assert.match(parseRunRequest({ task: 'x'.repeat(10001) }).error, /10000자/);
+});
+
+test('the prompt follows the notion page, the task, or both', () => {
+  const notionTemplate = 'N {{URL}} {{BRANCH}}\n';
+  const taskTemplate = 'T {{TASK}} {{BRANCH}}';
+  const prompt = (url, task) => buildPrompt({ notionTemplate, taskTemplate, url, task, branch: 'notion/1' });
+  assert.strictEqual(prompt('https://www.notion.so/a', ''), 'N https://www.notion.so/a notion/1\n');
+  assert.strictEqual(prompt('', '검색 {{BRANCH}} $&'), 'T 검색 {{BRANCH}} $& notion/1', 'task text is inserted as is');
+  const both = prompt('https://www.notion.so/a', '로그인 추가');
+  assert.ok(both.startsWith('N https://www.notion.so/a notion/1\n\n추가 업무 내용'));
+  assert.ok(both.trimEnd().endsWith('로그인 추가'));
+});
+
+test('a run can start from the task text alone and shows it on the detail page', async () => {
+  const t = await queueApp();
+  const post = (body) => fetch(`${t.base}/run`, { method: 'POST', headers: { Origin: t.base }, body: JSON.stringify(body) });
+  try {
+    const home = await (await fetch(t.base)).text();
+    assert.ok(home.includes('<textarea name="task"') && !/name="url"[^>]*required/.test(home), 'the link is optional');
+    assert.ok(home.indexOf('name="url"') < home.indexOf('name="task"'), 'the task box sits below the link');
+    assert.strictEqual((await post({ project: 'a', url: '', task: '' })).status, 400);
+
+    assert.strictEqual((await post({ project: 'a', url: '', task: '<b>검색</b> 추가' })).status, 202);
+    assert.strictEqual((await post({ project: 'a', task: '<b>검색</b> 추가' })).status, 409, 'same task twice');
+    assert.strictEqual((await post({ project: 'a', url: 'https://www.notion.so/p', task: '덧붙임' })).status, 202);
+    const [prompt] = t.started.map((s) => s.prompt);
+    assert.ok(prompt.includes('<b>검색</b> 추가') && !prompt.includes('{{'), 'the task template is filled');
+    assert.ok(!prompt.includes('Notion MCP'), 'a task-only run does not ask for notion');
+
+    const [both, alone] = await t.list();
+    assert.strictEqual(alone.url, '');
+    assert.strictEqual(both.task, '덧붙임');
+    const detail = await (await fetch(`${t.base}/runs/${alone.id}`)).text();
+    assert.ok(detail.includes('<th>업무 내용</th>') && detail.includes('&#60;b&#62;검색&#60;/b&#62; 추가'));
+    assert.match(detail, /<th>노션 문서<\/th><td>-<\/td>/);
+
+    t.started[0].end();
+    await t.until(() => t.started.length === 2);
+    assert.ok(t.started[1].prompt.includes('https://www.notion.so/p') && t.started[1].prompt.trimEnd().endsWith('덧붙임'));
+    t.started[1].end();
+    await t.until(async () => (await t.statuses()).every((s) => s === 'success'));
+  } finally {
+    t.close();
+  }
+});
+
+test('an existing database gains an empty task column', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runner-db-')), 'runner.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, url TEXT NOT NULL,
+    branch TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT);
+    INSERT INTO runs (project, url, branch, status, started_at) VALUES ('p', 'u', 'b', 'success', '2026-01-01T00:00:00.000Z');`);
+  old.close();
+  const db = openDb(file);
+  assert.strictEqual(db.getRun(1).task, '');
+  db.close();
 });

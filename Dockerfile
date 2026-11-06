@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   # Bind-mounted Windows folders show a different owner, which git would otherwise refuse.
   && git config --system --add safe.directory '*'
 WORKDIR /app
-COPY server.js lib.js db.js prompt.md mcp.json ./
+COPY server.js lib.js db.js prompt.md prompt-task.md mcp.json ./
 # An empty named volume inherits this owner, so the node user can write the database.
 RUN mkdir -p /data && chown node:node /data
 # bypassPermissions refuses to run as root.
