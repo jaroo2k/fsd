@@ -25,9 +25,17 @@ main{max-width:960px;margin:0 auto;padding:2.5rem 1.25rem 4rem}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 h1{margin:0;font-size:1.6rem;line-height:1.3;letter-spacing:-.02em;overflow-wrap:anywhere}
 h2{margin:0 0 .85rem;font-size:1.05rem}
-.brand{display:flex;align-items:center;gap:.9rem;margin-bottom:1.75rem}
+.gnb{position:sticky;top:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--border);box-shadow:var(--shadow)}
+.gnb-inner{display:flex;align-items:center;gap:1.5rem;max-width:960px;height:3.75rem;margin:0 auto;padding:0 1.25rem}
+.gnb-brand{display:flex;align-items:center;gap:.6rem;flex:none;color:var(--text);font-weight:700;white-space:nowrap}
+.gnb-brand:hover{text-decoration:none}.gnb-brand .mark{width:2rem;height:2rem;border-radius:.55rem;font-size:1rem}
+.gnb nav{display:flex;align-items:stretch;align-self:stretch;gap:.25rem;margin-left:auto}
+.gnb nav a{display:flex;align-items:center;padding:0 .9rem;border-bottom:2px solid transparent;color:var(--muted);font-size:.925rem;font-weight:600;white-space:nowrap}
+.gnb nav a:hover{text-decoration:none;color:var(--text)}
+.gnb nav a[aria-current]{color:var(--accent);border-bottom-color:var(--accent)}
+.brand{margin-bottom:1.75rem}
 .brand p{margin:.1rem 0 0;color:var(--muted);font-size:.95rem}
-.brand .nav{flex:none;margin-left:auto;font-size:.925rem;font-weight:600;white-space:nowrap}
+#history{scroll-margin-top:4.75rem}
 .mark{flex:none;display:grid;place-items:center;width:2.75rem;height:2.75rem;border-radius:.8rem;background:var(--accent);color:var(--on-accent);font-weight:700;font-size:1.3rem}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;box-shadow:var(--shadow);padding:1.25rem;margin-bottom:1.25rem}
 #f{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:1rem;align-items:end}
@@ -98,17 +106,25 @@ pre:empty::before{content:"표시할 로그가 없습니다.";color:#8a93a3}
 @media (max-width:640px){main{padding:1.5rem 1rem 3rem}#f,#search,#group-form{grid-template-columns:minmax(0,1fr)}#f .url,#f .task{grid-column:auto}button{width:100%}
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child,.runs td:nth-child(2){grid-column:1/-1}.runs td:nth-child(2){color:var(--muted);font-size:.9rem}
-.brand{flex-wrap:wrap}.brand>div{flex:1 1 calc(100% - 3.65rem)}.brand .nav{margin-left:3.65rem}
+.gnb-inner{gap:.75rem;padding:0 .75rem}.gnb-brand span.name{display:none}.gnb nav{gap:0}.gnb nav a{padding:0 .6rem}
 .projects thead{display:none}.projects tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .projects tr:last-child{border-bottom:0}.projects td{padding:0;border:0}.projects td:first-child{grid-column:1/-1;font-weight:600}
 .timeline li{grid-template-columns:minmax(0,1fr) auto;gap:.3rem .75rem}.timeline .track{grid-column:1/-1;grid-row:2}}
 </style>`;
 
+// Global navigation shown on every page; `current` marks the active menu.
+const gnb = (current) => {
+  const item = (key, href, label) => `<a href="${href}"${current === key ? ' aria-current="page"' : ''}>${label}</a>`;
+  return `<header class="gnb"><div class="gnb-inner"><a class="gnb-brand" href="/"><span class="mark" aria-hidden="true">N</span><span class="name">노션 개발 러너</span></a>
+<nav aria-label="주 메뉴">${item('runs', '/#history', '작업 기록')}${item('projects', '/projects', '프로젝트 관리')}</nav></div></header>`;
+};
+
 const page = (projects) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>노션 개발 러너</title>
 ${style}
+${gnb('runs')}
 <main>
-<header class="brand"><span class="mark" aria-hidden="true">N</span><div><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></div><a class="nav" href="/projects">프로젝트 관리</a></header>
+<header class="brand"><h1>노션 개발 러너</h1><p>노션 문서의 지시대로 새 브랜치에서 개발하고 결과를 문서에 정리합니다.</p></header>
 <section class="card">
 <form id="f"><label>프로젝트<select name="project" required>${projectOptions(projects)}</select></label>
 <label class="url">노션 링크<input name="url" type="url" placeholder="https://www.notion.so/..."></label>
@@ -118,7 +134,7 @@ ${style}
 </section>
 <div id="timeline"></div>
 <details class="card" id="log-card" open><summary><h2>실시간 로그</h2></summary><pre id="log" aria-live="polite"></pre></details>
-<section class="card"><h2>작업 기록</h2>
+<section class="card" id="history"><h2>작업 기록</h2>
 <form id="search" role="search"><label>제목<input name="q" type="search" placeholder="제목으로 검색"></label>
 <label>프로젝트<select name="project">${projectOptions(projects, '전체')}</select></label>
 <label>날짜<input name="date" type="date"></label>
@@ -257,8 +273,8 @@ runForm.onsubmit = async (e) => {
 const projectsPage = ({ rows, groups }) => `<!doctype html><html lang="ko"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>프로젝트 관리 - 노션 개발 러너</title>
 ${style}
+${gnb('projects')}
 <main>
-<a class="back" href="/">← 목록</a>
 <header class="title"><h1>프로젝트 관리</h1></header>
 <section class="card"><h2>그룹</h2>
 <form id="group-form"><label>새 그룹<input name="name" maxlength="50" required></label><button>추가</button></form>
@@ -351,8 +367,9 @@ const detailPage = (run, logs, alias, timeline) => `<!doctype html><html lang="k
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(run.title)}</title>
 ${['queued', 'running'].includes(run.status) ? '<meta http-equiv="refresh" content="3">' : ''}
 ${style}
+${gnb('runs')}
 <main>
-<a class="back" href="/">← 목록</a>
+<a class="back" href="/#history">← 작업 기록</a>
 <header class="title"><h1>${escapeHtml(run.title)}</h1><span class="badge ${escapeHtml(run.status)}">${escapeHtml(run.statusLabel)}</span></header>
 <nav class="views" aria-label="보기 방식">${timeline
     ? `<a href="/runs/${run.id}">간단히</a><a href="?view=time" aria-current="page">자세히</a>`
