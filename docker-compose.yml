@@ -15,7 +15,7 @@ services:
       NOTION_TOKEN: ${NOTION_TOKEN:-}
       DOCKER_HOST: tcp://docker:2375
     volumes:
-      - D:/fsd:/workspace
+      - ${RUNNER_WORKSPACE:-..}:/workspace
       - runner-data:/data
       - ${USERPROFILE}/.claude/.credentials.json:/home/node/.claude/.credentials.json
       - ${USERPROFILE}/.codex/auth.json:/home/node/.codex/auth.json
@@ -30,8 +30,8 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""
     volumes:
-      # Same path as the runner, so bind mounts in project compose files resolve.
-      - D:/fsd:/workspace
+      # Same path as the runner, so bind mounts in project compose files resolve. Default .. = parent of this repo.
+      - ${RUNNER_WORKSPACE:-..}:/workspace
       - docker-data:/var/lib/docker
 
 volumes:
