@@ -279,7 +279,7 @@ async function loadRuns() {
       badge.className = 'badge ' + r.status;
       badge.textContent = r.statusLabel;
       const row = document.createElement('tr');
-      for (const content of ['#' + r.id, link, r.alias || r.project, r.agentLabel, badge, new Date(r.started_at).toLocaleString()]) {
+      for (const content of [String(r.id), link, r.alias || r.project, r.agentLabel, badge, new Date(r.started_at).toLocaleString()]) {
         row.insertCell().append(content);
       }
       return row;
