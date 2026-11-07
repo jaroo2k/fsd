@@ -6,7 +6,7 @@ const { promisify } = require('node:util');
 
 const execFileAsync = promisify(execFile);
 const {
-  AGENTS, codexTranslator, listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog, maskSecrets,
+  AGENTS, codexTranslator, listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, timelineView, groupLog, maskSecrets, tokenUsage, tokensView,
 } = require('./lib');
 const { openDb } = require('./db');
 
@@ -124,6 +124,8 @@ pre:empty::before{content:"표시할 로그가 없습니다.";color:var(--log-em
 .bar.active{background:var(--bar-active)}.bar.done{background:var(--bar-done)}.bar.failed{background:var(--bar-failed)}.bar.stopped{background:var(--bar-stopped)}
 .dur{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .muted{margin:.75rem 0 0;color:var(--muted);font-size:.925rem}
+.card-head{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem 1rem;flex-wrap:wrap;margin:0 0 1.25rem}.card-head h2{margin:0}
+.tokens{color:var(--muted);font-size:.85rem;white-space:nowrap}.tokens b{color:var(--text);font-variant-numeric:tabular-nums}
 #timeline:empty{display:none}#timeline .timeline{max-height:40vh}#timeline h2 a{font-weight:400}
 .board-top{display:flex;align-items:flex-end;justify-content:space-between;gap:1.5rem;flex-wrap:wrap}
 .board-tools{display:flex;gap:.5rem;margin-bottom:1.75rem}.board-tools input{width:18rem;margin:0}
@@ -545,7 +547,12 @@ const BAR_LABELS = { active: '진행 중', done: '완료', failed: '실패', sto
 const barRow = (bar, attrs = '') => `<li${attrs}><span class="name">${escapeHtml(bar.name)}</span><span class="track"><span class="bar ${bar.state}" style="left:${bar.left}%;width:${bar.width}%"></span></span><span class="dur">${escapeHtml(bar.duration)}<span class="sr"> ${BAR_LABELS[bar.state]}</span></span></li>`;
 
 // heading lets the home page name and link the run it is showing.
-const timelineSection = (run, timeline, heading = '작업 시간') => `<section class="card"><h2>${heading}</h2>
+// The token count sits at the card's top right, once the run has reported any.
+const tokensBadge = (run) => {
+  const t = tokensView(run);
+  return t ? `<span class="tokens" title="입력 ${t.input} · 출력 ${t.output}">토큰 <b>${t.total}</b><span class="sr"> (입력 ${t.input}, 출력 ${t.output})</span></span>` : '';
+};
+const timelineSection = (run, timeline, heading = '작업 시간') => `<section class="card"><div class="card-head"><h2>${heading}</h2>${tokensBadge(run)}</div>
 ${run.status === 'queued' ? '<p class="muted">아직 시작하지 않았습니다.</p>' : `<p class="legend" aria-hidden="true">${Object.entries(BAR_LABELS).map(([state, label]) => `<span><i class="bar ${state}"></i>${label}</span>`).join('')}</p>
 <ol class="timeline">${barRow(timeline.total, ' class="total"')}${timeline.steps.map((bar) => barRow(bar)).join('')}</ol>
 ${timeline.steps.length ? '' : '<p class="muted">도구 기록이 없습니다. 이 기능을 넣기 전의 작업이거나 도구를 쓰지 않은 작업입니다.</p>'}`}
@@ -701,6 +708,18 @@ function createApp({ root, start = runAgent, db = openDb(':memory:') }) {
     let buffered = '';
     const translate = agent === 'codex' ? codexTranslator() : (e) => [e];
     const steps = new Map();
+    // Claude repeats an assistant message's usage on each of its content blocks, so the last one per message id wins.
+    // The final result carries the whole run's usage and replaces the running sum.
+    const usages = new Map();
+    const trackTokens = (e) => {
+      let total = null;
+      if (e.type === 'result') total = tokenUsage(e.usage);
+      else if (e.type === 'assistant' && e.message?.id && tokenUsage(e.message.usage)) {
+        usages.set(e.message.id, tokenUsage(e.message.usage));
+        total = [...usages.values()].reduce((a, u) => ({ input: a.input + u.input, output: a.output + u.output }), { input: 0, output: 0 });
+      }
+      if (total) record(() => db.setTokens(runId, total));
+    };
     // One bar per tool call. The bar lasts until the next call starts; the result only marks a call as done.
     const trackSteps = (e) => {
       for (const c of Array.isArray(e.message?.content) ? e.message.content : []) {
@@ -719,6 +738,7 @@ function createApp({ root, start = runAgent, db = openDb(':memory:') }) {
         try { events = translate(JSON.parse(line)); } catch { say(line); continue; }
         for (const e of events) {
           trackSteps(e);
+          trackTokens(e);
           if (e.type === 'result') {
             result = e;
             const summary = extractSummary(e.result);

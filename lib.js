@@ -259,7 +259,13 @@ function codexTranslator() {
       const events = started.has(item.id) ? [] : [use(item)];
       return [...events, { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: item.id }] } }];
     }
-    if (e.type === 'turn.completed') return [{ type: 'result', result: lastMessage, is_error: false }];
+    // Codex counts cached input inside input_tokens; Claude reports it apart, so it is split out the same way.
+    if (e.type === 'turn.completed') {
+      const u = e.usage && typeof e.usage === 'object' ? e.usage : null;
+      const cached = Number(u?.cached_input_tokens) || 0;
+      const usage = u && { input_tokens: Math.max((Number(u.input_tokens) || 0) - cached, 0), cache_read_input_tokens: cached, output_tokens: Number(u.output_tokens) || 0 };
+      return [{ type: 'result', result: lastMessage, is_error: false, ...(usage && { usage }) }];
+    }
     if (e.type === 'turn.failed') {
       const message = String(e.error?.message || '알 수 없는 오류');
       return [{ type: 'assistant', message: { content: [{ type: 'text', text: `오류: ${message}` }] } },
@@ -319,6 +325,25 @@ function timelineView(run, steps, now = Date.now()) {
   return { total: bar('전체', start, end, runState), steps: rows };
 }
 
+// Claude usage object to { input, output }. Input counts cached tokens too, since they are part of what was sent.
+function tokenUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.max(Number(v), 0) : 0);
+  return {
+    input: n(usage.input_tokens) + n(usage.cache_creation_input_tokens) + n(usage.cache_read_input_tokens),
+    output: n(usage.output_tokens),
+  };
+}
+
+// Null until the run has reported any usage, so older runs and runs that never got that far show nothing.
+function tokensView(run) {
+  if (run.input_tokens == null && run.output_tokens == null) return null;
+  const input = run.input_tokens || 0;
+  const output = run.output_tokens || 0;
+  const fmt = (v) => v.toLocaleString('ko-KR');
+  return { total: fmt(input + output), input: fmt(input), output: fmt(output) };
+}
+
 const SUMMARY_MAX = 100;
 
 // prompt.md asks for a "작업 요약: ..." line. The last one wins, since earlier text may quote the format.
@@ -343,5 +368,5 @@ function parseRunFilter(params) {
 }
 
 module.exports = {
-  AGENTS, codexTranslator, listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel, groupLog, maskSecrets,
+  AGENTS, codexTranslator, listProjects, parseProjectSettings, parseGroupName, projectView, projectOptions, groupOptions, groupItems, escapeHtml, isValidProject, parseNotionUrl, parseRunRequest, buildPrompt, MAX_TASK_LENGTH, isLocalRequest, formatEvent, runView, extractSummary, parseRunFilter, UNGROUPED, formatDuration, timelineView, toolLabel, groupLog, maskSecrets, tokenUsage, tokensView,
 };

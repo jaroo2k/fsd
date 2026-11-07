@@ -58,6 +58,12 @@ function openDb(file) {
   if (!db.prepare('PRAGMA table_info(runs)').all().some((column) => column.name === 'agent')) {
     db.exec("ALTER TABLE runs ADD COLUMN agent TEXT NOT NULL DEFAULT 'claude'");
   }
+  // Tokens the agent used, filled in while the run goes. Older rows stay NULL and show no count.
+  for (const column of ['input_tokens', 'output_tokens']) {
+    if (!db.prepare('PRAGMA table_info(runs)').all().some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE runs ADD COLUMN ${column} INTEGER`);
+    }
+  }
   const now = () => new Date().toISOString();
 
   // A run can't outlive the server that started it, so "running" here means the server died mid-run.
@@ -73,6 +79,7 @@ function openDb(file) {
   const markStarted = db.prepare("UPDATE runs SET status = 'running', branch = ?, started_at = ? WHERE id = ?");
   const insertLog = db.prepare('INSERT INTO run_logs (run_id, text) VALUES (?, ?)');
   const updateRun = db.prepare('UPDATE runs SET status = ?, finished_at = ? WHERE id = ?');
+  const updateTokens = db.prepare('UPDATE runs SET input_tokens = ?, output_tokens = ? WHERE id = ?');
   const updateSummary = db.prepare('UPDATE runs SET summary = ? WHERE id = ?');
   const countRuns = db.prepare(`SELECT COUNT(*) AS total FROM runs ${FILTER}`);
   const selectRuns = db.prepare(`SELECT runs.*, ${TITLE} AS title, projects.alias AS alias
@@ -114,6 +121,7 @@ function openDb(file) {
     appendLog: (runId, text) => { insertLog.run(runId, text); },
     finishRun: (runId, status) => { updateRun.run(status, now(), runId); },
     setSummary: (runId, summary) => { updateSummary.run(summary, runId); },
+    setTokens: (runId, { input, output }) => { updateTokens.run(input, output, runId); },
     // A page past the end (runs can shrink under a filter) shows the last page instead of nothing.
     listRuns: ({ q = '', project = '', from = '', to = '', page = 1, pageSize = PAGE_SIZE } = {}) => {
       if (![10, 20, 50, 100].includes(pageSize)) pageSize = PAGE_SIZE;
