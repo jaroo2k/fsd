@@ -85,7 +85,7 @@ table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:.7rem .5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
 tr:last-child>td,tr:last-child>th{border-bottom:0}
 th{color:var(--muted);font-size:.8rem;font-weight:600}
-.runs td:nth-child(n+3){white-space:nowrap}.runs td:last-child{color:var(--muted);font-size:.9rem}
+.runs td:first-child,.runs td:nth-child(n+4){white-space:nowrap}.runs td:last-child{color:var(--muted);font-size:.9rem}
 .runs tbody tr:hover{background:var(--accent-soft)}
 .meta th{width:6.5rem;vertical-align:top;padding-top:.85rem}
 #runs-note{margin:.75rem .5rem 0;color:var(--muted);font-size:.925rem}#runs-note:empty{display:none}
@@ -156,7 +156,7 @@ button.link{height:auto;padding:0;background:none;color:var(--accent);font-size:
 @media (max-width:900px){.workspace{grid-template-columns:minmax(0,1fr)}.workspace>*,.workspace>.request{grid-column:1;grid-row:auto}}
 @media (max-width:640px){main{padding:1.5rem 1rem 3rem}.card{padding:1.25rem}h1{font-size:1.6rem}#search,#group-form{grid-template-columns:minmax(0,1fr)}button{width:100%}.submit{flex-direction:column-reverse;align-items:stretch}
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
-.runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:first-child,.runs td:nth-child(2){grid-column:1/-1}.runs td:nth-child(2){color:var(--muted);font-size:.9rem}
+.runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:nth-child(-n+3){grid-column:1/-1}.runs td:first-child,.runs td:nth-child(3){color:var(--muted);font-size:.9rem}
 .gnb-inner{gap:.75rem;height:3.75rem;padding:0 .75rem}.gnb-brand span.name{display:none}.gnb nav{gap:0;margin-left:auto}.gnb nav a{padding:0 .6rem}.gnb .theme-toggle{width:2.4rem;margin-left:0}
 .projects thead{display:none}.projects tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .projects tr:last-child{border-bottom:0}.projects td{padding:0;border:0}.projects td:first-child{grid-column:1/-1;font-weight:600}
@@ -222,7 +222,7 @@ ${gnb('history')}
 <label>날짜<input name="date" type="date"></label>
 <button>검색</button><button type="reset" class="secondary">초기화</button></form>
 <label id="list-size">페이지당 표시 개수<select id="page-size"><option value="10">10개</option><option value="20" selected>20개</option><option value="50">50개</option><option value="100">100개</option></select></label>
-<table class="runs"><thead><tr><th>제목</th><th>프로젝트</th><th>Agent</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
+<table class="runs"><thead><tr><th>업무번호</th><th>제목</th><th>프로젝트</th><th>Agent</th><th>상태</th><th>시작</th></tr></thead><tbody id="runs"></tbody></table>
 <p id="runs-note" role="status"></p>
 <nav id="pager" aria-label="업무 내역 페이지" hidden><button id="prev" type="button" class="secondary">이전</button><span id="page-info"></span><button id="next" type="button" class="secondary">다음</button></nav></section>
 </main>
@@ -279,7 +279,7 @@ async function loadRuns() {
       badge.className = 'badge ' + r.status;
       badge.textContent = r.statusLabel;
       const row = document.createElement('tr');
-      for (const content of [link, r.alias || r.project, r.agentLabel, badge, new Date(r.started_at).toLocaleString()]) {
+      for (const content of ['#' + r.id, link, r.alias || r.project, r.agentLabel, badge, new Date(r.started_at).toLocaleString()]) {
         row.insertCell().append(content);
       }
       return row;
