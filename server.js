@@ -550,7 +550,7 @@ const barRow = (bar, attrs = '') => `<li${attrs}><span class="name">${escapeHtml
 // The token count sits at the card's top right, once the run has reported any.
 const tokensBadge = (run) => {
   const t = tokensView(run);
-  return t ? `<span class="tokens" title="입력 ${t.input} · 출력 ${t.output}">토큰 <b>${t.total}</b><span class="sr"> (입력 ${t.input}, 출력 ${t.output})</span></span>` : '';
+  return t ? `<span class="tokens" title="입력 ${t.input} · 출력 ${t.output}">사용 토큰 <b>${t.total}</b><span class="sr"> (입력 ${t.input}, 출력 ${t.output})</span></span>` : '';
 };
 const timelineSection = (run, timeline, heading = '작업 시간') => `<section class="card"><div class="card-head"><h2>${heading}</h2>${tokensBadge(run)}</div>
 ${run.status === 'queued' ? '<p class="muted">아직 시작하지 않았습니다.</p>' : `<p class="legend" aria-hidden="true">${Object.entries(BAR_LABELS).map(([state, label]) => `<span><i class="bar ${state}"></i>${label}</span>`).join('')}</p>

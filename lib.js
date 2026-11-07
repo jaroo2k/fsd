@@ -340,7 +340,8 @@ function tokensView(run) {
   if (run.input_tokens == null && run.output_tokens == null) return null;
   const input = run.input_tokens || 0;
   const output = run.output_tokens || 0;
-  const fmt = (v) => v.toLocaleString('ko-KR');
+  // 1000 and up is shown in thousands with a k, e.g. 12,345 -> 12.3k.
+  const fmt = (v) => (v >= 1000 ? `${(v / 1000).toLocaleString('ko-KR', { maximumFractionDigits: 1 })}k` : v.toLocaleString('ko-KR'));
   return { total: fmt(input + output), input: fmt(input), output: fmt(output) };
 }
 
