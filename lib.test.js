@@ -591,11 +591,13 @@ async function queueApp(db = openDb(':memory:')) {
     g('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-m', 'init');
   }
   const started = [];
+  let closed = false;
   const start = (prompt, cwd) => {
     const child = spawn(process.execPath, ['-e', `
       console.log(JSON.stringify({type:'result',is_error:false}));
       process.stdin.on('data', () => process.exit(0));`], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
-    started.push({ prompt, project: path.basename(cwd), end: () => child.stdin.write('x') });
+    started.push({ prompt, project: path.basename(cwd), child, end: () => child.stdin.write('x') });
+    if (closed) child.kill();
     return child;
   };
   const app = createApp({ root, db, start });
@@ -614,7 +616,14 @@ async function queueApp(db = openDb(':memory:')) {
     }
     assert.fail('timed out');
   };
-  const close = () => { app.closeAllConnections(); app.close(); };
+  // A failed test leaves fake runs waiting on stdin, which would keep the test process from ever exiting.
+  // Killing one lets the queue start the next, and a run may start after close, so those are killed too.
+  const close = () => {
+    closed = true;
+    for (const s of started) s.child.kill();
+    app.closeAllConnections();
+    app.close();
+  };
   return { root, base, post, list, statuses, started, until, close };
 }
 
@@ -670,6 +679,8 @@ test('a duplicate or non-repository request is not queued', async () => {
     assert.strictEqual((await t.post('b', 'two')).status, 409, 'same as a waiting one');
     assert.strictEqual((await t.post('b', 'one')).status, 202, 'same page in another project is different work');
     assert.strictEqual((await t.list()).length, 3);
+    // The first run starts only after its branch is made, which can still be going on here.
+    await t.until(() => t.started.length === 1);
     for (const name of ['b', 'b']) {
       t.started.at(-1).end();
       const count = t.started.length;
