@@ -20,7 +20,7 @@ WORKDIR /app
 COPY server.js lib.js db.js prompt.md prompt-task.md mcp.json ./
 COPY assets/logo.svg ./assets/
 # An empty named volume inherits this owner, so the node user can write the database. Codex writes its sessions
-# next to the mounted auth.json, so its folder must belong to node too.
+# next to auth.json (linked to this PC's file at start), so its folder must belong to node too.
 RUN mkdir -p /data /home/node/.codex && chown node:node /data /home/node/.codex
 # bypassPermissions refuses to run as root.
 USER node
