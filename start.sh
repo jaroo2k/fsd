@@ -17,6 +17,22 @@ if ((${#missing[@]})); then
   echo "      npm install -g @anthropic-ai/claude-code @openai/codex @notionhq/notion-mcp-server" >&2
 fi
 
+# On WSL, reuse the Windows logins by symlinking only the credential files, so a token refresh on either side
+# is seen by both. Existing files are left alone.
+if grep -qi microsoft /proc/version 2>/dev/null && command -v cmd.exe >/dev/null && command -v wslpath >/dev/null; then
+  winprofile=$(cd /mnt/c 2>/dev/null && cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r') || winprofile=
+  if [[ "$winprofile" == [A-Za-z]:\\* ]]; then
+    winhome=$(wslpath -u "$winprofile")
+    for file in .claude/.credentials.json .codex/auth.json; do
+      if [[ -f "$winhome/$file" && ! -e "$HOME/$file" && ! -L "$HOME/$file" ]]; then
+        mkdir -p "$(dirname "$HOME/$file")"
+        ln -s "$winhome/$file" "$HOME/$file"
+        echo "안내: Windows 로그인 정보를 연결했습니다: ~/$file → $winhome/$file" >&2
+      fi
+    done
+  fi
+fi
+
 [[ -f .env ]] || echo "안내: .env가 없어 NOTION_TOKEN 없이 실행합니다(노션 링크 업무는 거부됩니다)." >&2
 
 exec node --env-file-if-exists=.env server.js

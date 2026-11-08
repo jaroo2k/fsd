@@ -53,7 +53,7 @@ Node 22.13 이상, Git, 그리고 `npm install -g @anthropic-ai/claude-code @ope
 ./start.sh
 ```
 
-`start.sh`는 Node 버전과 필요한 명령을 확인한 뒤 이 폴더의 `.env`를 읽어 서버를 실행합니다. 프로젝트 루트는 이 저장소의 상위 폴더이고, 바꾸려면 `.env`에 `RUNNER_ROOT=/home/<사용자>/work`처럼 적습니다(`RUNNER_WORKSPACE`는 Docker에서만 씁니다). 업무 내역은 이 폴더의 `runner.db`에 저장되어 Docker 볼륨의 기록과는 따로 쌓입니다. 코드를 수정하면 서버를 껐다가 다시 실행합니다.
+`start.sh`는 Node 버전과 필요한 명령을 확인한 뒤 이 폴더의 `.env`를 읽어 서버를 실행합니다. WSL2에서는 Windows에서 로그인한 정보를 그대로 쓰도록 `~/.claude/.credentials.json`과 `~/.codex/auth.json`을 Windows 사용자 폴더의 같은 파일에 심볼릭 링크로 연결합니다. 복사가 아니라 같은 파일을 쓰므로 한쪽에서 토큰이 갱신되어도 다른 쪽이 로그아웃되지 않습니다. WSL에 이미 이 파일이 있으면 건드리지 않으므로, WSL에서 따로 로그인하려면 해당 파일을 그대로 두면 됩니다. Windows에서 로그인하지 않았다면 WSL 안에서 `claude`와 `codex login`으로 로그인합니다. 프로젝트 루트는 이 저장소의 상위 폴더이고, 바꾸려면 `.env`에 `RUNNER_ROOT=/home/<사용자>/work`처럼 적습니다(`RUNNER_WORKSPACE`는 Docker에서만 씁니다). 업무 내역은 이 폴더의 `runner.db`에 저장되어 Docker 볼륨의 기록과는 따로 쌓입니다. 코드를 수정하면 서버를 껐다가 다시 실행합니다.
 
 이 방식은 컨테이너로 격리되지 않아 Claude와 Codex가 WSL 사용자 권한으로 실행되고, `/mnt/c`를 통해 Windows 파일에도 접근할 수 있습니다. 프로젝트 테스트에 Docker가 필요하면 별도로 설치해야 합니다.
 
