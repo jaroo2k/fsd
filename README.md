@@ -26,7 +26,7 @@
 
 ## 준비
 
-필요한 것은 Docker Desktop, Claude Code 로그인, Codex 로그인, Git 설정(`~/.gitconfig`)입니다. Codex는 이 PC의 `%USERPROFILE%\.codex\auth.json` 파일만 컨테이너에 연결하므로, 이 파일이 없으면 컨테이너가 시작되지 않습니다.
+필요한 것은 Docker Desktop, Claude Code 로그인, Codex 로그인, Git 설정(`~/.gitconfig`)입니다. Codex는 이 PC의 `%USERPROFILE%\.codex\auth.json`(WSL2에서는 `~/.codex/auth.json`) 파일만 컨테이너에 연결하므로, 이 파일이 없으면 컨테이너가 시작되지 않습니다.
 
 1. 저장소를 프로젝트 루트 아래 `fsd` 폴더(예: `D:\fsd\fsd`)에 받습니다. 폴더 이름은 `fsd`여야 합니다. 기본으로 이 저장소의 상위 폴더가 프로젝트 루트가 되고, 다른 폴더를 쓰려면 `.env`에 `RUNNER_WORKSPACE=E:/work`처럼 적습니다.
 2. https://www.notion.so/my-integrations 에서 내부 통합을 만들고 토큰을 복사합니다. 콘텐츠 읽기, 업데이트, 삽입 권한이 필요합니다.
@@ -34,6 +34,28 @@
 4. 작업할 노션 페이지의 `•••` → `연결` 메뉴에서 그 통합을 추가합니다.
 
 프로젝트는 프로젝트 루트 아래 `<이름>` 폴더(예: `D:\fsd\<이름>`)에 있어야 하고, git 저장소이며 커밋하지 않은 변경이 없어야 합니다.
+
+### WSL2에서 실행
+
+WSL2의 Ubuntu 같은 배포판 안에서도 같은 방법으로 실행할 수 있습니다. 로그인 정보와 Git 설정은 Windows 사용자 폴더 대신 WSL의 홈 폴더(`~/.claude/.credentials.json`, `~/.codex/auth.json`, `~/.gitconfig`)에서 연결합니다.
+
+- Docker는 Docker Desktop의 WSL 통합(Settings → Resources → WSL integration)을 켜거나, 배포판 안에 Docker Engine을 설치해서 씁니다.
+- Claude Code와 Codex는 WSL 안에서 설치하고 로그인해 위 파일을 만듭니다. Windows에서 로그인한 정보는 쓰지 않습니다.
+- 저장소와 프로젝트는 `/mnt/c` 아래가 아니라 WSL 파일 시스템(예: `~/fsd/fsd`, `~/fsd/<이름>`)에 두는 것이 빠릅니다. 다른 위치는 `.env`에 `RUNNER_WORKSPACE=/home/<사용자>/work`처럼 적습니다.
+- 컨테이너는 UID 1000인 `node` 사용자로 실행됩니다. WSL 사용자의 UID(`id -u`)가 1000이 아니면 프로젝트 파일과 로그인 정보를 읽거나 쓰지 못할 수 있습니다.
+- 셸에 `USERPROFILE`이 설정되어 있으면 그 경로를 먼저 쓰므로, WSL에서는 이 변수를 설정하지 않습니다.
+
+### Docker 없이 실행 (WSL2·Linux)
+
+Node 22.13 이상, Git, 그리고 `npm install -g @anthropic-ai/claude-code @openai/codex @notionhq/notion-mcp-server`로 설치한 명령이 필요합니다. Claude Code와 Codex에 로그인한 뒤 이 폴더에서 실행합니다.
+
+```
+./start.sh
+```
+
+`start.sh`는 Node 버전과 필요한 명령을 확인한 뒤 이 폴더의 `.env`를 읽어 서버를 실행합니다. 프로젝트 루트는 이 저장소의 상위 폴더이고, 바꾸려면 `.env`에 `RUNNER_ROOT=/home/<사용자>/work`처럼 적습니다(`RUNNER_WORKSPACE`는 Docker에서만 씁니다). 업무 내역은 이 폴더의 `runner.db`에 저장되어 Docker 볼륨의 기록과는 따로 쌓입니다. 코드를 수정하면 서버를 껐다가 다시 실행합니다.
+
+이 방식은 컨테이너로 격리되지 않아 Claude와 Codex가 WSL 사용자 권한으로 실행되고, `/mnt/c`를 통해 Windows 파일에도 접근할 수 있습니다. 프로젝트 테스트에 Docker가 필요하면 별도로 설치해야 합니다.
 
 ## 실행
 
@@ -91,7 +113,7 @@ DB 위치는 `RUNNER_DB` 환경 변수로 정하며, 기본값은 이 폴더의 
 
 ## 주의
 
-Claude는 권한 확인 없이(`bypassPermissions`), Codex는 승인과 샌드박스 없이(`--dangerously-bypass-approvals-and-sandbox`) 실행됩니다. 컨테이너에는 `D:\fsd` 전체와 Claude·Codex 로그인 정보가 연결되어 있어, 이 폴더의 다른 프로젝트를 건드릴 수 있고 노션 문서에 들어간 악성 지시도 그대로 실행될 수 있습니다. **본인이 작성한 문서에만 사용하세요.**
+Claude는 권한 확인 없이(`bypassPermissions`), Codex는 승인과 샌드박스 없이(`--dangerously-bypass-approvals-and-sandbox`) 실행됩니다. 컨테이너에는 프로젝트 루트(예: `D:\fsd`) 전체와 Claude·Codex 로그인 정보가 연결되어 있어, 이 폴더의 다른 프로젝트를 건드릴 수 있고 노션 문서에 들어간 악성 지시도 그대로 실행될 수 있습니다. **본인이 작성한 문서에만 사용하세요.**
 
 `docker` 서비스는 `privileged`로 실행됩니다. 호스트 컨테이너와는 분리되지만, 악성 지시가 실행되면 이 서비스를 통해 Docker VM 수준의 권한을 얻을 수 있습니다.
 

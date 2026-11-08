@@ -17,9 +17,10 @@ services:
     volumes:
       - ${RUNNER_WORKSPACE:-..}:/workspace
       - runner-data:/data
-      - ${USERPROFILE}/.claude/.credentials.json:/home/node/.claude/.credentials.json
-      - ${USERPROFILE}/.codex/auth.json:/home/node/.codex/auth.json
-      - ${USERPROFILE}/.gitconfig:/home/node/.gitconfig:ro
+      # Windows sets USERPROFILE; WSL2 and Linux shells have only HOME.
+      - ${USERPROFILE:-${HOME}}/.claude/.credentials.json:/home/node/.claude/.credentials.json
+      - ${USERPROFILE:-${HOME}}/.codex/auth.json:/home/node/.codex/auth.json
+      - ${USERPROFILE:-${HOME}}/.gitconfig:/home/node/.gitconfig:ro
 
   # Separate daemon so test runs cannot touch the host's containers. No ports published:
   # the unauthenticated 2375 port is reachable only from this compose network.
