@@ -28,7 +28,7 @@
 
 ## 준비
 
-필요한 것은 Docker Desktop과 이 PC의 다음 세 파일입니다. 로그인 정보와 Git 설정은 이 파일들만 컨테이너에 연결됩니다.
+필요한 것은 Docker Desktop과 이 PC의 다음 세 파일입니다. 컨테이너는 이 PC의 로그인을 그대로 쓰므로 컨테이너 안에서 따로 로그인하지 않습니다. `.claude`와 `.codex` 폴더가 컨테이너에 연결되지만, 시작할 때 그 안의 로그인 파일만 링크합니다. 이 PC에서 토큰이 갱신되어도 컨테이너가 바로 새 토큰을 쓰고, 컨테이너가 갱신한 토큰도 이 PC 파일에 저장됩니다.
 
 | 파일 | 용도 | 만드는 방법 |
 | --- | --- | --- |
@@ -36,9 +36,9 @@
 | `%USERPROFILE%\.codex\auth.json` | Codex 로그인 | 아래 명령으로 로그인하거나, 로그인된 다른 PC에서 복사 |
 | `%USERPROFILE%\.gitconfig` | 커밋 작성자 | `git config --global user.name "이름"`, `git config --global user.email "이메일"` |
 
-**세 파일을 컨테이너를 시작하기 전에 만들어 둡니다.** 없는 채로 시작하면 Docker가 그 자리에 빈 폴더를 만들어 로그인과 커밋이 실패합니다. 이때는 `docker compose stop runner`로 멈추고 그 빈 폴더를 지운 뒤 파일을 만들고 다시 시작합니다. `.gitconfig`에는 이름과 이메일이 들어 있어야 하며, 빈 파일이면 커밋할 수 없습니다.
+**세 파일을 컨테이너를 시작하기 전에 만들어 둡니다.** 로그인 파일이 없으면 그 에이전트를 실행할 때 로그인 오류가 납니다. 파일을 만든 뒤 `docker compose restart runner`로 다시 시작합니다. `.gitconfig`가 없는 채로 시작하면 Docker가 그 자리에 빈 폴더를 만들어 커밋이 실패합니다. 이때는 `docker compose stop runner`로 멈추고 그 빈 폴더를 지운 뒤 파일을 만들고 다시 시작합니다. `.gitconfig`에는 이름과 이메일이 들어 있어야 하며, 빈 파일이면 커밋할 수 없습니다.
 
-Codex가 이 PC에 설치되어 있지 않으면 러너 이미지를 빌드한 뒤(`docker compose build`) 이미지로 로그인합니다. 표시되는 주소를 브라우저에서 열고 코드를 입력하면 `auth.json`이 만들어집니다. 다른 PC의 `auth.json`을 복사해 써도 되지만, 한쪽에서 토큰이 갱신되면 다른 쪽은 다시 로그인해야 할 수 있습니다.
+Codex가 이 PC에 설치되어 있지 않으면 러너 이미지를 빌드한 뒤(`docker compose build`) 이미지로 로그인합니다. 표시되는 주소를 브라우저에서 열고 코드를 입력하면 `auth.json`이 만들어집니다. 다른 PC의 `auth.json`을 복사해 써도 되지만, 두 PC 중 한쪽에서 토큰이 갱신되면 다른 PC는 다시 로그인해야 할 수 있습니다.
 
 ```powershell
 docker run --rm -v "$env:USERPROFILE\.codex:/home/node/.codex" fsd-runner codex login --device-auth
@@ -50,6 +50,8 @@ docker run --rm -v "$env:USERPROFILE\.codex:/home/node/.codex" fsd-runner codex 
 4. 작업할 노션 페이지의 `•••` → `연결` 메뉴에서 그 통합을 추가합니다.
 
 프로젝트는 프로젝트 루트 아래 `<이름>` 폴더(예: `D:\fsd\<이름>`)에 있어야 하고, git 저장소이며 커밋하지 않은 변경이 없어야 합니다.
+
+Windows용 Git은 파일을 CRLF 줄바꿈으로 받습니다(기본 설정 `core.autocrlf=true`). 이 설정은 Windows의 Git 설치 폴더에 있어 컨테이너에 연결되지 않으므로, 컨테이너의 git에도 같은 값을 환경변수로 넣어 두었습니다. 이 값이 없으면 컨테이너가 모든 파일을 수정된 것으로 보고 업무가 `커밋하지 않은 변경이 있습니다.`로 실패합니다. PC에서 `core.autocrlf`를 `false`나 `input`으로 바꿔 쓴다면 `docker-compose.yml`의 `GIT_CONFIG_VALUE_0`도 같은 값으로 바꿉니다.
 
 ## 실행
 
