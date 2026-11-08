@@ -105,7 +105,7 @@ DB 위치는 `RUNNER_DB` 환경 변수로 정하며, 기본값은 이 폴더의 
 
 러너 이미지에는 Python, pytest, Docker CLI와 Compose, Playwright와 Chromium이 들어 있습니다. Docker 명령은 호스트가 아니라 별도의 `docker` 서비스에서 실행되므로 호스트의 컨테이너에는 접근하지 않습니다. 프로젝트에서 공개한 포트는 `docker` 호스트로 접속합니다. 받은 이미지는 `docker-data` 볼륨에 쌓이며, 이 볼륨도 `docker compose down -v`로 지워집니다.
 
-러너 자체의 테스트는 Node.js 22.5 이상에서 `node --test`로 실행합니다. 이 PC에 Node.js가 없으면 러너 이미지로 실행합니다. Windows 폴더를 그대로 연결하면 git 명령이 느려 오래 걸리므로, 컨테이너 안으로 복사해서 돌립니다.
+러너 자체의 테스트는 Node.js 22.5 이상에서 `node --test`로 실행합니다. 이 PC에 Node.js가 없으면 러너 이미지로 실행합니다. Windows 폴더를 그대로 연결하면 git 명령이 느려 오래 걸리므로, 컨테이너 안으로 복사해서 돌립니다. 아래 명령은 이 폴더(예: `D:\fsd\fsd`)에서 실행하고, 러너 이미지가 아직 없으면 먼저 `docker compose build`를 합니다.
 
 ```powershell
 docker run --rm -v "${PWD}:/src:ro" fsd-runner sh -c "cp -r /src /tmp/t && cd /tmp/t && rm -rf .git && node --test"
