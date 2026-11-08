@@ -50,7 +50,7 @@ function openDb(file) {
   if (!db.prepare('PRAGMA table_info(runs)').all().some((column) => column.name === 'summary')) {
     db.exec('ALTER TABLE runs ADD COLUMN summary TEXT');
   }
-  // Task text typed on the home page. Older rows had only a notion link, so they get an empty task.
+  // Task text typed on the 업무 실행 page. Older rows had only a notion link, so they get an empty task.
   if (!db.prepare('PRAGMA table_info(runs)').all().some((column) => column.name === 'task')) {
     db.exec("ALTER TABLE runs ADD COLUMN task TEXT NOT NULL DEFAULT ''");
   }

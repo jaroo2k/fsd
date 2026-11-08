@@ -72,15 +72,8 @@ button{height:2.9rem;padding:0 1.75rem;font:inherit;font-weight:700;color:var(--
 button:hover{background:var(--accent-hover)}
 #status{margin:.9rem 0 0;font-size:.925rem;font-weight:600}#status:empty{display:none}
 #status.ok,.note.ok{color:var(--ok)}#status.err,.note.err{color:var(--err)}
-.projects{table-layout:fixed}.projects th:first-child{width:30%}.projects input,.projects select{margin-top:0}.project-actions{display:flex;align-items:center;gap:.9rem;margin-top:.75rem}
 .note{margin:0;font-size:.925rem;font-weight:600}
 #group-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.75rem;align-items:end}
-#groups-note{margin-top:.75rem}#groups-note:empty{display:none}
-#group-list{list-style:none;margin:.9rem 0 0;padding:0}
-#group-list:empty::before{content:"그룹이 없습니다.";color:var(--muted);font-size:.925rem}
-#group-list li{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
-#group-list li:last-child{border-bottom:0}
-#group-list button{flex:none;width:auto;height:2.25rem;padding:0 .9rem;font-size:.875rem}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:.7rem .5rem;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
 tr:last-child>td,tr:last-child>th{border-bottom:0}
@@ -158,8 +151,6 @@ button.link{height:auto;padding:0;background:none;color:var(--accent);font-size:
 .runs thead{display:none}.runs tr{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
 .runs tbody tr:last-child{border-bottom:0}.runs td{padding:0;border:0}.runs td:nth-child(-n+3){grid-column:1/-1}.runs td:first-child,.runs td:nth-child(3){color:var(--muted);font-size:.9rem}
 .gnb-inner{gap:.75rem;height:3.75rem;padding:0 .75rem}.gnb-brand span.name{display:none}.gnb nav{gap:0;margin-left:auto}.gnb nav a{padding:0 .6rem}.gnb .theme-toggle{width:2.4rem;margin-left:0}
-.projects thead{display:none}.projects tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.4rem .6rem;padding:.75rem .25rem;border-bottom:1px solid var(--border)}
-.projects tr:last-child{border-bottom:0}.projects td{padding:0;border:0}.projects td:first-child{grid-column:1/-1;font-weight:600}
 .timeline li{grid-template-columns:minmax(0,1fr) auto;gap:.3rem .75rem}.timeline .track{grid-column:1/-1;grid-row:2}}
 </style>
 <script>
@@ -546,12 +537,12 @@ document.getElementById('board-search').addEventListener('input', (e) => {
 const BAR_LABELS = { active: '진행 중', done: '완료', failed: '실패', stopped: '중단됨' };
 const barRow = (bar, attrs = '') => `<li${attrs}><span class="name">${escapeHtml(bar.name)}</span><span class="track"><span class="bar ${bar.state}" style="left:${bar.left}%;width:${bar.width}%"></span></span><span class="dur">${escapeHtml(bar.duration)}<span class="sr"> ${BAR_LABELS[bar.state]}</span></span></li>`;
 
-// heading lets the home page name and link the run it is showing.
 // The token count sits at the card's top right, once the run has reported any.
 const tokensBadge = (run) => {
   const t = tokensView(run);
   return t ? `<span class="tokens" title="입력 ${t.input} · 출력 ${t.output}">사용 토큰 <b>${t.total}</b><span class="sr"> (입력 ${t.input}, 출력 ${t.output})</span></span>` : '';
 };
+// heading lets the 업무 실행 page name and link the run it is showing.
 const timelineSection = (run, timeline, heading = '작업 시간') => `<section class="card"><div class="card-head"><h2>${heading}</h2>${tokensBadge(run)}</div>
 ${run.status === 'queued' ? '<p class="muted">아직 시작하지 않았습니다.</p>' : `<p class="legend" aria-hidden="true">${Object.entries(BAR_LABELS).map(([state, label]) => `<span><i class="bar ${state}"></i>${label}</span>`).join('')}</p>
 <ol class="timeline">${barRow(timeline.total, ' class="total"')}${timeline.steps.map((bar) => barRow(bar)).join('')}</ol>
@@ -607,7 +598,7 @@ function runClaude(prompt, cwd) {
 
 function createApp({ root, start = runAgent, db = openDb(':memory:') }) {
   let current = null;
-  // The home page keeps showing the last run's bars after it ends.
+  // The 업무 실행 page keeps showing the last run's bars after it ends.
   let lastRunId = null;
   const queue = [];
   let log = [];
