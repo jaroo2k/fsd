@@ -36,7 +36,7 @@
 | `%USERPROFILE%\.codex\auth.json` | Codex 로그인 | 아래 명령으로 로그인하거나, 로그인된 다른 PC에서 복사 |
 | `%USERPROFILE%\.gitconfig` | 커밋 작성자 | `git config --global user.name "이름"`, `git config --global user.email "이메일"` |
 
-**세 파일을 컨테이너를 시작하기 전에 만들어 둡니다.** 로그인 파일이 없으면 그 에이전트를 실행할 때 로그인 오류가 납니다. 파일을 만든 뒤 `docker compose restart runner`로 다시 시작합니다. `.gitconfig`가 없는 채로 시작하면 Docker가 그 자리에 빈 폴더를 만들어 커밋이 실패합니다. 이때는 `docker compose stop runner`로 멈추고 그 빈 폴더를 지운 뒤 파일을 만들고 다시 시작합니다. `.gitconfig`에는 이름과 이메일이 들어 있어야 하며, 빈 파일이면 커밋할 수 없습니다.
+로그인 파일이 없으면 그 Agent를 실행할 때 로그인 오류가 납니다. 컨테이너는 이 PC 폴더의 파일을 바로 읽으므로, 나중에 로그인해도 재시작 없이 다음 업무부터 쓰입니다. **`.gitconfig`는 컨테이너를 시작하기 전에 만들어 둡니다.** 없는 채로 시작하면 Docker가 그 자리에 빈 폴더를 만들어 커밋이 실패합니다. 이때는 `docker compose stop runner`로 멈추고 그 빈 폴더를 지운 뒤 파일을 만들고 다시 시작합니다. `.gitconfig`에는 이름과 이메일이 들어 있어야 하며, 빈 파일이면 커밋할 수 없습니다.
 
 Codex가 이 PC에 설치되어 있지 않으면 러너 이미지를 빌드한 뒤(`docker compose build`) 이미지로 로그인합니다. 표시되는 주소를 브라우저에서 열고 코드를 입력하면 `auth.json`이 만들어집니다. 다른 PC의 `auth.json`을 복사해 써도 되지만, 두 PC 중 한쪽에서 토큰이 갱신되면 다른 PC는 다시 로그인해야 할 수 있습니다.
 
@@ -113,7 +113,7 @@ docker run --rm -v "${PWD}:/src:ro" fsd-runner sh -c "cp -r /src /tmp/t && cd /t
 
 ## 주의
 
-Claude는 권한 확인 없이(`bypassPermissions`), Codex는 승인과 샌드박스 없이(`--dangerously-bypass-approvals-and-sandbox`) 실행됩니다. 컨테이너에는 프로젝트 루트 전체와 Claude·Codex 로그인 정보가 연결되어 있어, 이 폴더의 다른 프로젝트를 건드릴 수 있고 노션 문서에 들어간 악성 지시도 그대로 실행될 수 있습니다. **본인이 작성한 문서에만 사용하세요.**
+Claude는 권한 확인 없이(`bypassPermissions`), Codex는 승인과 샌드박스 없이(`--dangerously-bypass-approvals-and-sandbox`) 실행됩니다. 컨테이너에는 프로젝트 루트 전체와 이 PC의 `%USERPROFILE%\.claude`, `%USERPROFILE%\.codex` 폴더 전체가 쓰기 가능하게 연결되어 있습니다. 이 폴더들에는 로그인 정보뿐 아니라 다른 프로젝트의 대화 기록(`projects`, `sessions`, `history.jsonl`), 메모리, 설정도 들어 있습니다. 그래서 Agent가 이 폴더의 다른 프로젝트와 이 파일들을 읽거나 바꿀 수 있고, 노션 문서에 들어간 악성 지시도 그대로 실행될 수 있습니다. **본인이 작성한 문서에만 사용하세요.**
 
 `docker` 서비스는 `privileged`로 실행됩니다. 호스트 컨테이너와는 분리되지만, 악성 지시가 실행되면 이 서비스를 통해 Docker VM 수준의 권한을 얻을 수 있습니다.
 
