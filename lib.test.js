@@ -19,6 +19,15 @@ const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdi
 git('init');
 git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-m', 'init');
 
+// A run starts after the response (the branch is made asynchronously), so tests wait for what they check.
+async function until(check) {
+  for (let i = 0; i < 400; i += 1) {
+    if (await check()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.fail('timed out');
+}
+
 test('project must be an exact child directory', () => {
   assert.ok(isValidProject('repo', tmp));
   for (const bad of ['..\\x', '../repo', 'none', '', null]) assert.ok(!isValidProject(bad, tmp), String(bad));
@@ -45,7 +54,8 @@ test('server refuses unsafe runs and allows one at a time', async () => {
   let child;
   const start = () => (child = spawn(process.execPath, ['-e',
     "console.log(JSON.stringify({type:'result',is_error:false}));setTimeout(()=>{},300)"]));
-  const app = createApp({ root: tmp, start });
+  const db = openDb(':memory:');
+  const app = createApp({ root: tmp, db, start });
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.address().port}`;
   const post = (project, origin = base) => fetch(`${base}/run`, {
@@ -57,11 +67,18 @@ test('server refuses unsafe runs and allows one at a time', async () => {
     assert.ok(html.includes('<option value="repo">repo</option>') && html.includes('<option value="plain">plain</option>'));
     assert.strictEqual((await post('repo', 'https://evil.com')).status, 403);
     assert.strictEqual((await post('plain')).status, 400);
+
+    // The tree is checked when the run starts, after the response, so a dirty tree fails the run instead.
     fs.writeFileSync(path.join(repo, 'dirty.txt'), 'x');
-    assert.strictEqual((await post('repo')).status, 400);
+    assert.strictEqual((await post('repo')).status, 202);
+    await until(() => db.listRuns().runs[0].status === 'failed');
+    assert.ok(db.getLogs(db.listRuns().runs[0].id).some((l) => l.includes('커밋하지 않은 변경이 있습니다.')));
+    assert.ok(!child, 'a dirty tree never starts the agent');
     fs.rmSync(path.join(repo, 'dirty.txt'));
 
     assert.strictEqual((await post('repo')).status, 202);
+    assert.strictEqual((await post('repo')).status, 409, 'refused while the same run is still making its branch');
+    await until(() => child);
     assert.match(git('branch', '--show-current'), /^notion\//);
     assert.strictEqual((await post('repo')).status, 409);
     await new Promise((r) => child.on('close', r));
@@ -98,8 +115,10 @@ async function recordRun(start, db = openDb(':memory:')) {
       body: JSON.stringify({ project: 'repo', url: 'https://www.notion.so/a' }),
     });
     const res = await post();
+    const list = async () => (await (await fetch(`${base}/runs`)).json()).runs;
+    await until(async () => !['queued', 'running'].includes((await list())[0].status));
     await closed;
-    const { runs } = await (await fetch(`${base}/runs`)).json();
+    const runs = await list();
     const detail = await (await fetch(`${base}/runs/${runs[0].id}`)).text();
     const timeline = await (await fetch(`${base}/runs/${runs[0].id}?view=time`)).text();
     const live = await (await fetch(`${base}/timeline`)).text();
@@ -132,7 +151,7 @@ test('tool calls are timed and shown as bars in the detailed view', async () => 
     say({type:'assistant',message:{content:[{type:'tool_use',id:'t1',name:'Read<x>',input:{file_path:'secret.txt'}}]}});
     setTimeout(() => {
       say({type:'user',message:{content:[{type:'tool_result',tool_use_id:'t1',content:'top secret'}]}});
-      say({type:'assistant',message:{content:[{type:'tool_use',id:'t2',name:'Bash',input:{command:'echo hidden'}}]}});
+      say({type:'assistant',message:{content:[{type:'tool_use',id:'t2',name:'Bash',input:{command:'echo hidden',description:'인사 출력'}}]}});
       say({type:'result',is_error:false});
     }, 150);`));
   assert.ok(!detail.includes('class="timeline"'), 'simple view has no bars');
@@ -141,9 +160,9 @@ test('tool calls are timed and shown as bars in the detailed view', async () => 
   assert.match(timeline, /<span class="name">명령 실행<\/span><span class="track"><span class="bar stopped"/, 'a call with no result is not shown as done');
   assert.match(timeline, /class="total"><span class="name">전체<\/span><span class="track"><span class="bar done"/);
   const bars = timeline.slice(timeline.indexOf('<ol class="timeline">'), timeline.indexOf('</ol>'));
-  assert.ok(bars && !bars.includes('echo hidden'), 'bars show tool names only');
-  assert.ok(timeline.includes('[도구] 명령 실행: echo hidden'), 'the log says what a command was for');
-  for (const hidden of ['secret.txt', 'top secret']) assert.ok(!timeline.includes(hidden), `${hidden} is not shown`);
+  assert.ok(bars && !bars.includes('인사 출력'), 'bars show tool names only');
+  assert.ok(timeline.includes('[도구] 명령 실행: 인사 출력'), 'the log says what a command was for');
+  for (const hidden of ['secret.txt', 'top secret', 'echo hidden']) assert.ok(!timeline.includes(hidden), `${hidden} is not shown`);
   assert.ok(live.includes('<span class="name">Read&#60;x&#62;</span>'), 'home page fragment shows the same bars');
   assert.ok(live.includes(`href="/runs/${runs[0].id}?view=time"`), 'home page fragment links to the run');
   assert.ok(!live.includes('<html'), 'home page gets a fragment, not a page');
@@ -157,7 +176,9 @@ test('home page has a live timeline that is empty before any run', async () => {
     assert.ok((await (await fetch(`${base}/execute`)).text()).includes('id="timeline"'));
     const res = await fetch(`${base}/timeline`);
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(await res.text(), '');
+    const empty = await res.text();
+    assert.ok(empty.includes('아직 실행한 업무가 없습니다'), 'the card keeps its place and says nothing ran yet');
+    assert.ok(!empty.includes('class="timeline"') && !empty.includes('<html'));
   } finally {
     app.closeAllConnections();
     app.close();
@@ -191,7 +212,7 @@ test('step bars run until the next step starts, so they add up to the total', ()
 test('tool names are shown in plain Korean in the live log', () => {
   const { formatEvent, toolLabel } = require('./lib');
   const tool = (name) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input: { command: 'secret' } }] } });
-  assert.strictEqual(formatEvent(tool('Bash')), '[도구] 명령 실행: secret');
+  assert.strictEqual(formatEvent(tool('Bash')), '[도구] 명령 실행', 'the command itself is never shown');
   assert.strictEqual(formatEvent(tool('mcp__notion__API-patch-block-children')), '[도구] 노션 페이지에 내용 추가', 'only commands show their input');
   assert.strictEqual(toolLabel('mcp__notion__API-new-thing'), '노션 작업');
   assert.strictEqual(toolLabel('mcp__my_db__query'), 'my_db 연결 기능 (query)');
@@ -202,13 +223,15 @@ test('tool names are shown in plain Korean in the live log', () => {
   assert.strictEqual(formatEvent('plain text'), 'plain text');
 });
 
-test('a command shows its description, or only its first line, cut short', () => {
+test('a command shows only the first line of its description, cut short', () => {
   const { formatEvent } = require('./lib');
   const bash = (input) => formatEvent(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input }] } }));
   assert.strictEqual(bash({ command: 'git status', description: '  작업 폴더 상태 확인 ' }), '[도구] 명령 실행: 작업 폴더 상태 확인');
-  assert.strictEqual(bash({ command: 'cat <<EOF\nline two\nEOF' }), '[도구] 명령 실행: cat <<EOF …', 'later lines are hidden');
-  assert.strictEqual(bash({ command: 'x'.repeat(100) }), `[도구] 명령 실행: ${'x'.repeat(80)}…`);
-  for (const input of [undefined, null, 'text', {}, { command: 5 }]) assert.strictEqual(bash(input), '[도구] 명령 실행');
+  assert.strictEqual(bash({ description: '첫 줄\n둘째 줄' }), '[도구] 명령 실행: 첫 줄', 'later lines are hidden');
+  assert.strictEqual(bash({ description: '가'.repeat(50) }), `[도구] 명령 실행: ${'가'.repeat(40)}…`);
+  for (const input of [undefined, null, 'text', {}, { command: 'cat secret.txt' }, { description: 5 }]) {
+    assert.strictEqual(bash(input), '[도구] 명령 실행', JSON.stringify(input));
+  }
 });
 
 test('back-to-back calls of the same tool are grouped in the log', () => {
@@ -258,8 +281,9 @@ test('failed exit, spawn error and sync throw are recorded as failed', async () 
   assert.strictEqual(missing.runs[0].status, 'failed');
 
   const thrown = await recordRun(() => { throw new Error('boom'); });
-  assert.strictEqual(thrown.res.status, 400);
+  assert.strictEqual(thrown.res.status, 202, 'the agent starts after the response');
   assert.strictEqual(thrown.runs[0].status, 'failed');
+  assert.ok(thrown.detail.includes('실패: boom'));
   assert.notStrictEqual(thrown.again.status, 409, 'server is not stuck as running');
 });
 
@@ -411,8 +435,9 @@ test('run list pages by 20 and filters by title and time', async () => {
 
 test('run filter parsing', () => {
   const parse = (query) => parseRunFilter(new URLSearchParams(query));
-  assert.deepStrictEqual(parse(''), { q: '', project: '', from: '', to: '', page: 1 });
-  assert.deepStrictEqual(parse('q=%20a%20&page=2'), { q: 'a', project: '', from: '', to: '', page: 2 });
+  assert.deepStrictEqual(parse(''), { q: '', project: '', from: '', to: '', page: 1, pageSize: 20 });
+  assert.deepStrictEqual(parse('q=%20a%20&page=2&pageSize=50'), { q: 'a', project: '', from: '', to: '', page: 2, pageSize: 50 });
+  for (const size of ['30', '0', 'abc', '-20']) assert.strictEqual(parse(`pageSize=${size}`).pageSize, 20, `pageSize=${size}`);
   assert.strictEqual(parse('from=2026-01-01'), null);
 });
 
@@ -487,9 +512,11 @@ test('project management is its own page, linked from the home page', async () =
     assert.strictEqual(home.headers.get('cache-control'), 'no-store');
     const homeHtml = await home.text();
     assert.ok(homeHtml.includes('href="/projects"'));
-    assert.ok(!homeHtml.includes('id="projects"') && !homeHtml.includes('name="alias"'));
+    assert.ok(!homeHtml.includes('class="board"') && !homeHtml.includes('name="alias"'));
     const manage = await (await fetch(`${base}/projects`)).text();
-    assert.ok(manage.includes('id="projects"') && manage.includes('id="group-form"'));
+    assert.ok(manage.includes('class="board"') && manage.includes('id="group-form"'));
+    assert.ok(manage.includes('data-name="repo"') && manage.includes('data-name="plain"'), 'one card per folder');
+    assert.ok(manage.includes('<span>git 아님</span>'), 'a folder that is not a repository says so');
     assert.ok(manage.includes('<select name="group"') && !manage.includes('datalist'));
     assert.ok(manage.includes('href="/"'));
   } finally {
@@ -595,6 +622,7 @@ test('requests during a run wait and then run one at a time, in order', async ()
   const t = await queueApp();
   try {
     assert.strictEqual((await t.post('a', 'one')).status, 202);
+    await t.until(() => t.started.length === 1);
     const waiting = await t.post('b', 'two');
     assert.strictEqual(waiting.status, 202);
     assert.match(await waiting.text(), /대기 1번째/);
@@ -624,7 +652,7 @@ test('requests during a run wait and then run one at a time, in order', async ()
     await t.until(async () => (await t.statuses()).join() === 'success,success,success');
     assert.deepStrictEqual(t.started.map((s) => s.project), ['a', 'b', 'a']);
     assert.strictEqual((await t.post('a', 'four')).status, 202, 'an idle server starts right away');
-    assert.strictEqual((await t.statuses()).at(-1), 'running');
+    await t.until(async () => (await t.statuses()).at(-1) === 'running');
     t.started[3].end();
     await t.until(async () => (await t.statuses()).at(-1) === 'success');
   } finally {
@@ -661,6 +689,7 @@ test('a queued run that cannot start fails and the next one still runs', async (
     await t.post('a', 'one');
     await t.post('a', 'two');
     await t.post('b', 'three');
+    await t.until(() => t.started.length === 1);
     fs.writeFileSync(path.join(t.root, 'a', 'left-behind.txt'), 'x');
     t.started[0].end();
     await t.until(async () => (await t.statuses()).join() === 'success,failed,running');
@@ -740,9 +769,12 @@ test('run list shows the project alias and filters by project', async () => {
 });
 
 test('a run needs a notion link, a task, or both', () => {
-  assert.deepStrictEqual(parseRunRequest({ url: 'https://www.notion.so/a' }), { url: 'https://www.notion.so/a', task: '' });
-  assert.deepStrictEqual(parseRunRequest({ url: '', task: '  검색 추가\n' }), { url: '', task: '검색 추가' });
-  assert.deepStrictEqual(parseRunRequest({ url: 'https://www.notion.so/a', task: '더' }), { url: 'https://www.notion.so/a', task: '더' });
+  assert.deepStrictEqual(parseRunRequest({ url: 'https://www.notion.so/a' }), { url: 'https://www.notion.so/a', task: '', agent: 'claude' });
+  assert.deepStrictEqual(parseRunRequest({ url: '', task: '  검색 추가\n', agent: 'codex' }), { url: '', task: '검색 추가', agent: 'codex' });
+  assert.deepStrictEqual(parseRunRequest({ url: 'https://www.notion.so/a', task: '더' }), { url: 'https://www.notion.so/a', task: '더', agent: 'claude' });
+  for (const agent of ['gpt', '', 'constructor', 1]) {
+    assert.match(parseRunRequest({ task: '일', agent }).error, /Claude나 Codex/, String(agent));
+  }
   for (const bad of [{}, null, { url: ' ', task: ' \n' }, { url: 1, task: [] }]) {
     assert.match(parseRunRequest(bad).error, /노션 링크나 업무 내용/, JSON.stringify(bad));
   }
@@ -773,6 +805,7 @@ test('a run can start from the task text alone and shows it on the detail page',
     assert.strictEqual((await post({ project: 'a', url: '', task: '<b>검색</b> 추가' })).status, 202);
     assert.strictEqual((await post({ project: 'a', task: '<b>검색</b> 추가' })).status, 409, 'same task twice');
     assert.strictEqual((await post({ project: 'a', url: 'https://www.notion.so/p', task: '덧붙임' })).status, 202);
+    await t.until(() => t.started.length === 1);
     const [prompt] = t.started.map((s) => s.prompt);
     assert.ok(prompt.includes('<b>검색</b> 추가') && !prompt.includes('{{'), 'the task template is filled');
     assert.ok(!prompt.includes('Notion MCP'), 'a task-only run does not ask for notion');
