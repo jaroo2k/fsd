@@ -6,7 +6,7 @@ services:
     # No --watch: a run that edits this repo would restart the server and cut itself off.
     # Links only the login files from this PC's folders, so the container uses the PC's login.
     # Mounting a single file pins it, so a token the PC refreshes would never reach the container.
-    # The whole folders are not used: their settings hold Windows-only hooks.
+    # The folders are mounted aside, not used as the container's own config: their settings hold Windows-only hooks.
     command: ["sh", "-c", "mkdir -p ~/.claude ~/.codex && ln -sfn /host/claude/.credentials.json ~/.claude/.credentials.json && ln -sfn /host/codex/auth.json ~/.codex/auth.json && exec node /workspace/fsd/server.js"]
     restart: unless-stopped
     ports:
