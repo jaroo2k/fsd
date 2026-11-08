@@ -36,7 +36,7 @@
 | `%USERPROFILE%\.codex\auth.json` | Codex 로그인 | 아래 명령으로 로그인하거나, 로그인된 다른 PC에서 복사 |
 | `%USERPROFILE%\.gitconfig` | 커밋 작성자 | `git config --global user.name "이름"`, `git config --global user.email "이메일"` |
 
-로그인 파일이 없으면 그 Agent를 실행할 때 로그인 오류가 납니다. 컨테이너는 이 PC 폴더의 파일을 바로 읽으므로, 나중에 로그인해도 재시작 없이 다음 업무부터 쓰입니다. **`.gitconfig`는 컨테이너를 시작하기 전에 만들어 둡니다.** 없는 채로 시작하면 Docker가 그 자리에 빈 폴더를 만들어 커밋이 실패합니다. 이때는 `docker compose stop runner`로 멈추고 그 빈 폴더를 지운 뒤 파일을 만들고 다시 시작합니다. `.gitconfig`에는 이름과 이메일이 들어 있어야 하며, 빈 파일이면 커밋할 수 없습니다.
+로그인 파일이 없으면 그 Agent를 실행할 때 로그인 오류가 납니다. 컨테이너는 이 PC 폴더의 파일을 바로 읽으므로, 나중에 로그인해도 재시작 없이 다음 업무부터 쓰입니다. **`.gitconfig`는 컨테이너를 시작하기 전에 만들어 둡니다.** 없는 채로 시작하면 Docker가 이 PC의 그 자리에 빈 폴더를 만들어, 컨테이너와 이 PC 양쪽에서 git 명령이 모두 실패합니다. 러너는 이 상태를 알아채면 서버를 띄우지 않고 이유를 `docker compose logs runner`에 남긴 채 멈춥니다(재시작 정책 때문에 계속 다시 시도합니다). 이때는 `docker compose stop runner`로 멈추고 그 빈 폴더를 지운 뒤 파일을 만들고 다시 시작합니다. `.gitconfig`에는 이름과 이메일이 들어 있어야 하며, 빈 파일이면 커밋할 수 없습니다.
 
 Codex가 이 PC에 설치되어 있지 않으면 러너 이미지를 빌드한 뒤(`docker compose build`) 이미지로 로그인합니다. 표시되는 주소를 브라우저에서 열고 코드를 입력하면 `auth.json`이 만들어집니다. 다른 PC의 `auth.json`을 복사해 써도 되지만, 두 PC 중 한쪽에서 토큰이 갱신되면 다른 PC는 다시 로그인해야 할 수 있습니다.
 

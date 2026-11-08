@@ -7,7 +7,8 @@ services:
     # Links only the login files from this PC's folders, so the container uses the PC's login.
     # Mounting a single file pins it, so a token the PC refreshes would never reach the container.
     # The folders are mounted aside, not used as the container's own config: their settings hold Windows-only hooks.
-    command: ["sh", "-c", "mkdir -p ~/.claude ~/.codex && ln -sfn /host/claude/.credentials.json ~/.claude/.credentials.json && ln -sfn /host/codex/auth.json ~/.codex/auth.json && exec node /workspace/fsd/server.js"]
+    # A missing .gitconfig on this PC is mounted as an empty folder, which breaks every git command, so stop with the reason.
+    command: ["sh", "-c", "if [ -d ~/.gitconfig ]; then echo '%USERPROFILE%\\.gitconfig 파일이 없어 Docker가 그 자리에 빈 폴더를 만들었습니다. README의 준비 절을 따라 폴더를 지우고 파일을 만든 뒤 다시 시작하세요.' >&2; exit 1; fi; mkdir -p ~/.claude ~/.codex && ln -sfn /host/claude/.credentials.json ~/.claude/.credentials.json && ln -sfn /host/codex/auth.json ~/.codex/auth.json && exec node /workspace/fsd/server.js"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:4317:4317"
